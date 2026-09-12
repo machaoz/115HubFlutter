@@ -12,6 +12,12 @@ if(MSVC)
 endif()
 # MinGW/GCC：默认自动导出全部公共符号；后续如需收敛可换 visibility=hidden + HUB_API_EXPORT 宏
 
+# MinGW：静态链接 GCC 运行时，产物不依赖 libgcc_s_seh-1 / libstdc++-6 / libwinpthread-1，
+# 否则 Flutter 单 exe 分发时必须额外携带这三个 DLL
+if(MINGW)
+  target_link_options(hub_native PRIVATE -static-libgcc -static-libstdc++ -static)
+endif()
+
 hub_apply_common(hub_native)
 
 # ---- 原生冒烟程序：验证 dll 导出面可用（lunch native 后自动运行）----

@@ -10,10 +10,15 @@ OsInfo os_info() {
   using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
   HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
   if (ntdll != nullptr) {
+    // 函数指针强转在 GCC 下需抑制 -Wcast-function-type；MSVC 的 /W4 不报此项
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
     auto fn = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion"));
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
     if (fn != nullptr) {
       RTL_OSVERSIONINFOEXW vi{};
       vi.dwOSVersionInfoSize = sizeof(vi);

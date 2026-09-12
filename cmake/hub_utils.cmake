@@ -29,4 +29,9 @@ function(hub_apply_common target)
     ARCHIVE_OUTPUT_DIRECTORY ${HUB_OUTPUT_DIR}
     LIBRARY_OUTPUT_DIRECTORY ${HUB_OUTPUT_DIR}
     RUNTIME_OUTPUT_DIRECTORY ${HUB_OUTPUT_DIR})
+  # Windows 下统一去掉 lib 前缀：Dart FFI 按固定名 hub_native.dll 加载，
+  # 不因工具链（MSVC / MinGW）不同而变名，避免打包脚本二次适配
+  if(WIN32)
+    set_target_properties(${target} PROPERTIES PREFIX "")
+  endif()
 endfunction()

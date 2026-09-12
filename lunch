@@ -57,9 +57,19 @@ setup_msvc_env() {
   local vcvars="$vsdir/VC/Auxiliary/Build/vcvarsall.bat"
   [ -f "$vcvars" ] || return 1
 
-  local win_vcvars envout
+  # 导入 MSVC 环境。两个坑：
+  #   1) 本机全局设了 MSYS_NO_PATHCONV=1 / MSYS2_ARG_CONV_EXCL=*，cmd //c 不会被转成 /c，
+  #      直接在命令行拼 "a.bat && set" 会失败 —— 故先经临时 .bat 包装，再在 subshell 里
+  #      临时解除转换限制（用 env -u 同样可行）。
+  #   2) 安装路径含空格与括号 (x86)，拼接引号易碎 —— 交给 .bat 内的 call 处理。
+  local win_vcvars tmpbat win_bat envout
   win_vcvars=$(cygpath -w "$vcvars")
-  envout=$(cmd //c "\"$win_vcvars\" x64 >nul 2>&1 && set" 2>/dev/null) || return 1
+  tmpbat="${TEMP:-/tmp}/hub_vcvars_$$.bat"
+  printf '@echo off\r\ncall "%s" x64 >nul 2>&1\r\nset\r\n' "$win_vcvars" > "$tmpbat"
+  win_bat=$(cygpath -w "$tmpbat" 2>/dev/null || echo "$tmpbat")
+  envout=$( ( unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL; cmd //c "$win_bat" ) 2>/dev/null | tr -d '\r' ) || true
+  rm -f "$tmpbat"
+  [ -n "$envout" ] || return 1
 
   local k v
   while IFS='=' read -r k v; do
@@ -103,6 +113,18 @@ lunch_native() {
   local cmake_args=()
 
   detect_toolchain
+
+  # 工具链切换会让 CMake 缓存失效（生成器/编译器不匹配会直接报错），自动清理重建
+  local stamp="$bdir/.hub_toolchain"
+  if [ -f "$stamp" ]; then
+    local prev; prev=$(cat "$stamp" 2>/dev/null || echo "")
+    if [ "$prev" != "$TOOLCHAIN" ]; then
+      warn "工具链由 ${prev:-未知} 切换为 $TOOLCHAIN，清理旧构建缓存 $bdir_win"
+      rm -rf "$bdir"
+    fi
+  fi
+  mkdir -p "$bdir"
+  printf '%s' "$TOOLCHAIN" > "$stamp"
 
   if [ "$TOOLCHAIN" = "mingw" ]; then
     cmake_args+=(-DCMAKE_CXX_COMPILER=g++)

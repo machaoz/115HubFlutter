@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# ============================================================================
+# 115HubFlutter 构建编排脚本（lunch）
+#
+# 用法：
+#   ./lunch all                全量编译打包（默认 debug）→ debug/Magnetic115Hub/
+#   ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
+#   ./lunch gui                只构建 gui 模块（Flutter，默认 debug）
+#   ./lunch gui --release      只构建 gui 模块（release）
+#   ./lunch baselib|network|system|native   只构建对应原生模块（自动带依赖）
+#   ./lunch clean              清理 .cache/
+#   ./lunch distclean          清理 .cache/ debug/ release/
+#   ./lunch help               帮助
+#
+# 工具链策略：MSVC（cl.exe）优先；检测不到时尝试 vswhere+vcvars 导入环境；
+# 仍不可用回退 MinGW（仅原生模块可用，Flutter 构建必须 MSVC）。
+# 环境变量：HUB_TOOLCHAIN=msvc|mingw 可强制指定。
+# ============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+PROJECT_WIN="$(cygpath -m "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")"   # 供 Windows 程序（cmake/flutter）使用
+
+CMAKE_BIN="${CMAKE_BIN:-cmake}"
+NINJA_BIN="${NINJA_BIN:-ninja}"
+FLUTTER_BIN="${FLUTTER_BIN:-flutter}"
+
+# 国内网络环境默认走 pub 镜像（pub.dev 部分归档走 Google 存储会卡死）；已设外部变量则尊重外部值
+export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
+export FLUTTER_STORAGE_BASEURL="${FLUTTER_STORAGE_BASEURL:-https://storage.flutter-io.cn}"
+
+APP_DIR="$PROJECT_DIR/app"
+GUI_DIR="$APP_DIR/gui"
+CACHE_DIR="$PROJECT_DIR/.cache"
+
+C_RED=$'\033[31m'; C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_CYN=$'\033[36m'; C_OFF=$'\033[0m'
+say()  { printf '%s[lunch]%s %s\n' "$C_CYN" "$C_OFF" "$*"; }
+ok()   { printf '%s[ ok ]%s %s\n' "$C_GRN" "$C_OFF" "$*"; }
+warn() { printf '%s[warn]%s %s\n' "$C_YEL" "$C_OFF" "$*"; }
+fail() { printf '%s[fail]%s %s\n' "$C_RED" "$C_OFF" "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# 工具链准备：CL_IN_PATH / MSVC_ENV_OK / TOOLCHAIN 变量
+# ---------------------------------------------------------------------------
+TOOLCHAIN=""
+MSVC_ENV_OK=0
+
+setup_msvc_env() {
+  local vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+  [ -f "$vswhere" ] || return 1
+  local vsdir
+  vsdir=$("$vswhere" -latest -products '*' \
+           -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+           -property installationPath 2>/dev/null | tr -d '\r' | head -1)
+  [ -n "$vsdir" ] || return 1
+  local vcvars="$vsdir/VC/Auxiliary/Build/vcvarsall.bat"
+  [ -f "$vcvars" ] || return 1
+
+  local win_vcvars envout
+  win_vcvars=$(cygpath -w "$vcvars")
+  envout=$(cmd //c "\"$win_vcvars\" x64 >nul 2>&1 && set" 2>/dev/null) || return 1
+
+  local k v
+  while IFS='=' read -r k v; do
+    case "$k" in
+      PATH)
+        local posix_new
+        posix_new=$(cygpath -p "$v" 2>/dev/null || true)
+        [ -n "$posix_new" ] && export PATH="$posix_new:$PATH"
+        ;;
+      INCLUDE|LIB|LIBPATH|WindowsSdkDir|WindowsSDKVersion|VCToolsInstallDir|VCToolsVersion|ExternalIncludePath)
+        [ -n "$v" ] && export "$k=$v"
+        ;;
+    esac
+  done <<< "$envout"
+  command -v cl >/dev/null 2>&1
+}
+
+detect_toolchain() {
+  command -v cl >/dev/null 2>&1 && { TOOLCHAIN=msvc; return 0; }
+  if [ "${HUB_TOOLCHAIN:-auto}" != "mingw" ]; then
+    if setup_msvc_env; then
+      command -v cl >/dev/null 2>&1 && { TOOLCHAIN=msvc; MSVC_ENV_OK=1; return 0; }
+    fi
+  fi
+  if command -v gcc >/dev/null 2>&1; then
+    TOOLCHAIN=mingw
+    warn "MSVC(cl.exe) 不可用，原生模块回退 MinGW(gcc)。Flutter GUI 构建仍需 MSVC。"
+    return 0
+  fi
+  fail "找不到可用 C++ 编译器（cl/gcc）。请安装 VS Build Tools 或 MinGW。"
+}
+
+# ---------------------------------------------------------------------------
+# 原生构建：lunch_native <Debug|Release> [target]
+# ---------------------------------------------------------------------------
+lunch_native() {
+  local config="$1"
+  local target="${2:-all}"
+  local bdir="$CACHE_DIR/${config,,}"
+  local bdir_win="$PROJECT_WIN/.cache/${config,,}"
+  local cmake_args=()
+
+  detect_toolchain
+
+  if [ "$TOOLCHAIN" = "mingw" ]; then
+    cmake_args+=(-DCMAKE_CXX_COMPILER=g++)
+  else
+    cmake_args+=(-DCMAKE_CXX_COMPILER=cl)
+  fi
+
+  say "配置原生构建（$TOOLCHAIN / $config）→ $bdir_win"
+  "$CMAKE_BIN" -S "$PROJECT_WIN" -B "$bdir_win" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$config" "${cmake_args[@]}"
+
+  say "构建目标：$target"
+  "$CMAKE_BIN" --build "$bdir_win" --target "$target"
+
+  # 冒烟：all / hub_native 时连带构建并运行冒烟程序
+  if [ "$target" = "all" ] || [ "$target" = "hub_native" ]; then
+    "$CMAKE_BIN" --build "$bdir_win" --target hub_native_smoke >/dev/null
+    if [ -f "$bdir/hub_native_smoke.exe" ]; then
+      say "运行原生冒烟：hub_native_smoke"
+      "$bdir/hub_native_smoke.exe"
+      ok "原生冒烟通过（hub_native.dll 导出面可用）"
+    fi
+  fi
+  ok "原生构建完成 → $bdir_win"
+}
+
+# ---------------------------------------------------------------------------
+# Flutter 构建：lunch_gui <debug|release>
+# ---------------------------------------------------------------------------
+lunch_gui() {
+  local mode="$1"   # debug | release
+  [ -d "$GUI_DIR" ] || fail "gui 模块不存在：$GUI_DIR（尚未 flutter create）"
+  [ -f "$GUI_DIR/pubspec.yaml" ] || fail "$GUI_DIR 下没有 pubspec.yaml"
+
+  command -v "$FLUTTER_BIN" >/dev/null 2>&1 || fail "flutter 不在 PATH"
+
+  say "flutter build windows --$mode"
+  (cd "$GUI_DIR" && "$FLUTTER_BIN" build windows "--$mode")
+  local runner="$GUI_DIR/build/windows/x64/runner"
+  [ "$mode" = "release" ] && runner="$runner/Release" || runner="$runner/Debug"
+  [ -d "$runner" ] || fail "flutter 产物目录不存在：$runner"
+
+  local dest="$CACHE_DIR/flutter-$mode"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -r "$runner/." "$dest/"
+  ok "gui 构建完成 → $dest"
+}
+
+# ---------------------------------------------------------------------------
+# 打包合流：lunch_package <debug|release>
+# ---------------------------------------------------------------------------
+lunch_package() {
+  local mode="$1"
+  local config; [ "$mode" = "release" ] && config=Release || config=Debug
+  local dest_root="$PROJECT_DIR/$mode"
+  local dest="$dest_root/Magnetic115Hub"
+
+  local flutter_dir="$CACHE_DIR/flutter-$mode"
+  local native_dir="$CACHE_DIR/${mode,,}"
+
+  [ -d "$flutter_dir" ] || fail "缺少 Flutter 产物（$flutter_dir），请先构建 gui"
+  [ -f "$native_dir/hub_native.dll" ] || fail "缺少 hub_native.dll，请先构建 native"
+
+  say "合流打包 → $dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -r "$flutter_dir/." "$dest/"
+  cp "$native_dir/hub_native.dll" "$dest/"
+  if [ -f "$native_dir/hub_native_smoke.exe" ]; then
+    cp "$native_dir/hub_native_smoke.exe" "$dest/"
+  fi
+  ok "打包完成：$dest"
+  echo
+  echo "  产物目录：$dest"
+  echo "  启动入口：$dest/$(ls "$dest" | grep -i '\.exe$' | grep -vi smoke | head -1)"
+}
+
+# ---------------------------------------------------------------------------
+# 参数解析
+# ---------------------------------------------------------------------------
+MODE="debug"
+for a in "$@"; do
+  case "$a" in
+    --release|-r) MODE="release" ;;
+    --debug|-d)    MODE="debug" ;;
+  esac
+done
+
+cmd="${1:-help}"
+[ $# -eq 0 ] && cmd="all"   # ./lunch 无参等价 ./lunch all
+cmd=$(echo "$cmd" | tr '[:upper:]' '[:lower:]')
+
+case "$cmd" in
+  all)
+    lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" all
+    lunch_gui "$MODE"
+    lunch_package "$MODE"
+    ok "全量完成（$MODE）"
+    ;;
+  gui)
+    lunch_gui "$MODE"
+    ;;
+  baselib|network|system)
+    lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" "hub_$cmd"
+    ;;
+  native)
+    lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" hub_native
+    ;;
+  package|pack)
+    lunch_package "$MODE"
+    ;;
+  clean)
+    rm -rf "$CACHE_DIR"
+    ok "已清理 $CACHE_DIR"
+    ;;
+  distclean)
+    rm -rf "$CACHE_DIR" "$PROJECT_DIR/debug" "$PROJECT_DIR/release"
+    ok "已清理全部构建产物"
+    ;;
+  help|-h|--help|"")
+    cat <<'EOF'
+lunch —— 115HubFlutter 构建编排
+
+  ./lunch all                全量编译打包（默认 debug）→ debug/Magnetic115Hub/
+  ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
+  ./lunch gui [--release]    只构建 gui（Flutter）
+  ./lunch native [--release] 只构建原生模块 + hub_native.dll（含冒烟）
+  ./lunch baselib|network|system [--release]   只构建对应原生模块
+  ./lunch clean              清理 .cache/
+  ./lunch distclean          清理 .cache/ debug/ release/
+  ./lunch help               本帮助
+
+环境变量：HUB_TOOLCHAIN=msvc|mingw 强制工具链（默认自动：MSVC 优先，回退 MinGW）
+EOF
+    ;;
+  *)
+    fail "未知命令：$cmd（./lunch help 查看用法）"
+    ;;
+esac

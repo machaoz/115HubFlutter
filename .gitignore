@@ -1,0 +1,23 @@
+# ---- 构建产物 ----
+.cache/
+debug/
+release/
+
+# ---- Flutter / Dart ----
+app/gui/.dart_tool/
+app/gui/.flutter-plugins*
+app/gui/.metadata.bak
+app/gui/build/
+app/gui/windows/flutter/ephemeral/
+app/gui/linux/flutter/ephemeral/
+app/gui/macos/Flutter/ephemeral/
+*.g.dart~
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.swp
+
+# ---- 系统 ----
+Thumbs.db
+.DS_Store

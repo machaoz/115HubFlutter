@@ -1,0 +1,11 @@
+LIBRARY hub_native
+EXPORTS
+    hub_version
+    hub_self_check
+    hub_sys_os_version
+    hub_sys_app_data_dir
+    hub_sys_single_instance_busy
+    hub_parse_magnet_infohash
+    hub_parse_pan115_sha1
+    hub_net_rate_acquire
+    hub_sha1_file

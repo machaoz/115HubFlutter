@@ -37,6 +37,14 @@ dependencies:
 
   # FFI 绑定工具（Utf8 转换 / malloc），对应 app/native/hub_api.h
   ffi: ^2.1.0
+  flutter_riverpod: ^3.4.3
+  sqlite3: ^3.5.2
+  sqlite3_flutter_libs: 0.5.0
+  dio: ^5.11.1
+  path: ^1.9.1
+  collection: ^1.19.1
+  crypto: ^3.0.7
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
@@ -59,6 +67,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # 迁移 SQL（双端单一来源，`assets/migrations/vN.sql` 必须与 Electron 版逐字一致）
+  assets:
+    - assets/migrations/
+    - assets/migrations/checksums.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

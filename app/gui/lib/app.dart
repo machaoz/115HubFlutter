@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'state/providers.dart';
 import 'ui/theme.dart';
 import 'ui/app_shell.dart';
-import 'core/db/settings.dart';
 import 'features/overview/overview_page.dart';
 import 'features/discover/discover_page.dart';
 import 'features/search/search_page.dart';
@@ -15,16 +14,46 @@ import 'features/settings/settings_page.dart';
 class Magnetic115HubApp extends ConsumerWidget {
   const Magnetic115HubApp({super.key});
 
+  /// 导航项：icon = 常态（outlined），activeIcon = 激活态（filled）。
+  /// 「设置」齿轮激活时旋转一圈（spinOnActivate），作为进入设置页的记忆点。
   static const List<NavItem> _pages = <NavItem>[
-    NavItem(label: '概览', icon: Icons.space_dashboard_outlined, page: OverviewPage()),
-    NavItem(label: '发现', icon: Icons.grid_view_outlined, page: DiscoverPage()),
-    NavItem(label: '搜索', icon: Icons.search, page: SearchPage()),
     NavItem(
-        label: '导入',
-        icon: Icons.download_for_offline_outlined,
-        page: ImportPage()),
-    NavItem(label: '收藏库', icon: Icons.star_outline, page: LibraryPage()),
-    NavItem(label: '设置', icon: Icons.settings_outlined, page: SettingsPage()),
+      label: '概览',
+      icon: Icons.space_dashboard_outlined,
+      activeIcon: Icons.space_dashboard,
+      page: OverviewPage(),
+    ),
+    NavItem(
+      label: '发现',
+      icon: Icons.grid_view_outlined,
+      activeIcon: Icons.grid_view,
+      page: DiscoverPage(),
+    ),
+    NavItem(
+      label: '搜索',
+      icon: Icons.search_outlined,
+      activeIcon: Icons.search,
+      page: SearchPage(),
+    ),
+    NavItem(
+      label: '导入',
+      icon: Icons.download_for_offline_outlined,
+      activeIcon: Icons.download_for_offline,
+      page: ImportPage(),
+    ),
+    NavItem(
+      label: '收藏库',
+      icon: Icons.star_outline,
+      activeIcon: Icons.star,
+      page: LibraryPage(),
+    ),
+    NavItem(
+      label: '设置',
+      icon: Icons.settings_outlined,
+      activeIcon: Icons.settings,
+      spinOnActivate: true,
+      page: SettingsPage(),
+    ),
   ];
 
   @override
@@ -32,20 +61,31 @@ class Magnetic115HubApp extends ConsumerWidget {
     final dbAsync = ref.watch(appDatabaseProvider);
     final settings = ref.watch(appSettingsProvider);
 
-    return MaterialApp(
-      title: 'Magnetic115Hub',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(AppTokens.light),
-      darkTheme: buildTheme(AppTokens.dark),
-      themeMode: switch (settings.theme) {
-        ThemeModePref.dark => ThemeMode.dark,
-        ThemeModePref.light => ThemeMode.light,
-        ThemeModePref.system => ThemeMode.system,
-      },
-      home: dbAsync.when(
-        loading: () => const _Booting(),
-        error: (e, _) => _BootError(err: e.toString()),
-        data: (_) => const AppShell(pages: _pages),
+    // 跟随系统：OS 明暗可能在 App 之上（无 MediaQuery 祖先），做兜底
+    final platformBrightness =
+        MediaQuery.maybePlatformBrightnessOf(context) ??
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    final tokens = resolveTokens(
+      preset: settings.presetId,
+      platformBrightness: platformBrightness,
+      customDark: settings.customDark,
+      customAccent: settings.customAccent,
+    );
+    final theme = buildTheme(tokens);
+
+    return AppTokensScope(
+      tokens: tokens,
+      child: MaterialApp(
+        title: 'Magnetic115Hub',
+        debugShowCheckedModeBanner: false,
+        theme: theme,
+        darkTheme: theme,
+        themeMode: ThemeMode.system,
+        home: dbAsync.when(
+          loading: () => const _Booting(),
+          error: (e, _) => _BootError(err: e.toString()),
+          data: (_) => const AppShell(pages: _pages),
+        ),
       ),
     );
   }
@@ -71,8 +111,13 @@ class _Booting extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               alignment: Alignment.center,
-              child: const Text('磁',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+              child: const Text(
+                '磁',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             CircularProgressIndicator(color: t.accent),
@@ -126,9 +171,14 @@ class HubCardErrorCard extends StatelessWidget {
             children: <Widget>[
               Icon(Icons.error_outline, color: t.danger),
               const SizedBox(width: 8),
-              Text('启动失败',
-                  style: TextStyle(
-                      color: t.textHi, fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(
+                '启动失败',
+                style: TextStyle(
+                  color: t.textHi,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),

@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -77,10 +76,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       return;
     }
     final text = _export(_items, fmt);
-    await Clipboard.setData(ClipboardData(text: text));
+    await copyToClipboard(
+      context,
+      text,
+      successLabel: '已复制 ${_items.length} 条到剪贴板（${fmt.name}）',
+    );
     HubLogger.i('导出 ${fmt.name}，共 ${_items.length} 条');
-    if (!mounted) return;
-    showHubToast(context, '已复制 ${_items.length} 条到剪贴板（${fmt.name}）');
   }
 
   @override
@@ -131,9 +132,21 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                   _refresh();
                 },
               ),
-            GhostButton(label: '文本', icon: Icons.article_outlined, onPressed: () => _doExport(ExportFormat.text)),
-            GhostButton(label: 'CSV', icon: Icons.table_rows_outlined, onPressed: () => _doExport(ExportFormat.csv)),
-            GhostButton(label: '115://', icon: Icons.bolt_outlined, onPressed: () => _doExport(ExportFormat.pan115)),
+            GhostButton(
+              label: '文本',
+              icon: Icons.article_outlined,
+              onPressed: () => _doExport(ExportFormat.text),
+            ),
+            GhostButton(
+              label: 'CSV',
+              icon: Icons.table_rows_outlined,
+              onPressed: () => _doExport(ExportFormat.csv),
+            ),
+            GhostButton(
+              label: '115://',
+              icon: Icons.bolt_outlined,
+              onPressed: () => _doExport(ExportFormat.pan115),
+            ),
           ],
         ),
         const SizedBox(height: 18),
@@ -152,18 +165,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         else
           HubCard(
             padding: EdgeInsets.zero,
-            child: LayoutBuilder(builder: (context, c) {
-              if (c.maxWidth < 680) {
-                // 窄屏转卡片视图
-                return Column(
-                  children: _items
-                      .map((it) =>
-                          _CardTile(item: it, db: db, onRefresh: _refresh))
-                      .toList(),
-                );
-              }
-              return _Table(items: _items, db: db, onRefresh: _refresh);
-            }),
+            child: LayoutBuilder(
+              builder: (context, c) {
+                if (c.maxWidth < 680) {
+                  // 窄屏转卡片视图
+                  return Column(
+                    children: _items
+                        .map(
+                          (it) =>
+                              _CardTile(item: it, db: db, onRefresh: _refresh),
+                        )
+                        .toList(),
+                  );
+                }
+                return _Table(items: _items, db: db, onRefresh: _refresh);
+              },
+            ),
           ),
       ],
     );
@@ -174,7 +191,11 @@ enum ExportFormat { text, csv, pan115 }
 
 /// 窄屏（<680px）卡片视图：表格塌缩为单列卡片
 class _CardTile extends StatelessWidget {
-  const _CardTile({required this.item, required this.db, required this.onRefresh});
+  const _CardTile({
+    required this.item,
+    required this.db,
+    required this.onRefresh,
+  });
 
   final ResourceItem item;
   final HubDatabase? db;
@@ -194,19 +215,28 @@ class _CardTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: t.textHi, fontWeight: FontWeight.w600)),
+          Text(
+            item.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: t.textHi, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             children: <Widget>[
-              Text(item.kind == ResourceKind.pan115 ? '秒传' : '磁力',
-                  style: TextStyle(color: t.textDim, fontSize: 12.5)),
-              Text(fmtBytes(item.sizeBytes),
-                  style: TextStyle(color: t.textDim, fontSize: 12.5)),
-              Text(item.groupName, style: TextStyle(color: t.textDim, fontSize: 12.5)),
+              Text(
+                item.kind == ResourceKind.pan115 ? '秒传' : '磁力',
+                style: TextStyle(color: t.textDim, fontSize: 12.5),
+              ),
+              Text(
+                fmtBytes(item.sizeBytes),
+                style: TextStyle(color: t.textDim, fontSize: 12.5),
+              ),
+              Text(
+                item.groupName,
+                style: TextStyle(color: t.textDim, fontSize: 12.5),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -217,7 +247,7 @@ class _CardTile extends StatelessWidget {
                 icon: Icons.copy_all_outlined,
                 t: t,
                 label: '复制',
-                onTap: () => Clipboard.setData(ClipboardData(text: item.copyTarget)),
+                onTap: () => copyToClipboard(context, item.copyTarget),
               ),
               const SizedBox(width: 8),
               _MiniBtn(
@@ -240,7 +270,11 @@ class _CardTile extends StatelessWidget {
 }
 
 class _Table extends StatelessWidget {
-  const _Table({required this.items, required this.db, required this.onRefresh});
+  const _Table({
+    required this.items,
+    required this.db,
+    required this.onRefresh,
+  });
   final List<ResourceItem> items;
   final HubDatabase? db;
   final VoidCallback onRefresh;
@@ -251,7 +285,11 @@ class _Table extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
-        headingTextStyle: TextStyle(color: t.textDim, fontSize: 12.5, fontWeight: FontWeight.w600),
+        headingTextStyle: TextStyle(
+          color: t.textDim,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+        ),
         dataTextStyle: TextStyle(color: t.text, fontSize: 14.5),
         columns: <DataColumn>[
           const DataColumn(label: Text('名称')),
@@ -262,52 +300,63 @@ class _Table extends StatelessWidget {
           const DataColumn(label: Text('操作')),
         ],
         rows: items.map((it) {
-          return DataRow(cells: <DataCell>[
-            DataCell(
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 380),
-                child: Text(it.title,
+          return DataRow(
+            cells: <DataCell>[
+              DataCell(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Text(
+                    it.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: t.textHi, fontWeight: FontWeight.w600)),
+                    style: TextStyle(
+                      color: t.textHi,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
-            ),
-            DataCell(Text(it.kind == ResourceKind.pan115 ? '秒传' : '磁力')),
-            DataCell(Text(it.groupName)),
-            DataCell(Text(fmtBytes(it.sizeBytes))),
-            DataCell(ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 180),
-              child: Text(it.favoriteKey,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: t.textDim, fontSize: 12.5)),
-            )),
-            DataCell(Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                _MiniBtn(
-                  icon: Icons.copy_all_outlined,
-                  t: t,
-                  label: '复制',
-                  onTap: () async {
-                    await Clipboard.setData(ClipboardData(text: it.copyTarget));
-                  },
+              DataCell(Text(it.kind == ResourceKind.pan115 ? '秒传' : '磁力')),
+              DataCell(Text(it.groupName)),
+              DataCell(Text(fmtBytes(it.sizeBytes))),
+              DataCell(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 180),
+                  child: Text(
+                    it.favoriteKey,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: t.textDim, fontSize: 12.5),
+                  ),
                 ),
-                const SizedBox(width: 8),
-                _MiniBtn(
-                  icon: Icons.delete_outline,
-                  t: t,
-                  label: '删除',
-                  danger: true,
-                  onTap: () {
-                    if (db == null) return;
-                    FavoritesRepo(db!).delete(it.favoriteKey);
-                    onRefresh();
-                  },
+              ),
+              DataCell(
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _MiniBtn(
+                      icon: Icons.copy_all_outlined,
+                      t: t,
+                      label: '复制',
+                      onTap: () => copyToClipboard(context, it.copyTarget),
+                    ),
+                    const SizedBox(width: 8),
+                    _MiniBtn(
+                      icon: Icons.delete_outline,
+                      t: t,
+                      label: '删除',
+                      danger: true,
+                      onTap: () {
+                        if (db == null) return;
+                        FavoritesRepo(db!).delete(it.favoriteKey);
+                        onRefresh();
+                      },
+                    ),
+                  ],
                 ),
-              ],
-            )),
-          ]);
+              ),
+            ],
+          );
         }).toList(),
       ),
     );
@@ -315,8 +364,13 @@ class _Table extends StatelessWidget {
 }
 
 class _MiniBtn extends StatelessWidget {
-  const _MiniBtn(
-      {required this.icon, required this.t, required this.label, required this.onTap, this.danger = false});
+  const _MiniBtn({
+    required this.icon,
+    required this.t,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
   final IconData icon;
   final AppTokens t;
   final String label;
@@ -325,25 +379,25 @@ class _MiniBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        button: true,
-        label: label,
-        child: InkWell(
+    button: true,
+    label: label,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(9),
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border.all(color: t.border),
           borderRadius: BorderRadius.circular(9),
-          onTap: onTap,
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: t.surface,
-              border: Border.all(color: t.border),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            alignment: Alignment.center,
-            child: Tooltip(
-              message: label,
-              child: Icon(icon, size: 17, color: danger ? t.danger : t.textHi),
-            ),
-          ),
         ),
-      );
+        alignment: Alignment.center,
+        child: Tooltip(
+          message: label,
+          child: Icon(icon, size: 17, color: danger ? t.danger : t.textHi),
+        ),
+      ),
+    ),
+  );
 }

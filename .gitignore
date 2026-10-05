@@ -2,12 +2,14 @@
 .cache/
 debug/
 release/
+libs/hub_log/build/
 
 # ---- Flutter / Dart ----
 app/gui/.dart_tool/
 app/gui/.flutter-plugins*
 app/gui/.metadata.bak
 app/gui/build/
+app/gui/hub_native.dll
 app/gui/windows/flutter/ephemeral/
 app/gui/linux/flutter/ephemeral/
 app/gui/macos/Flutter/ephemeral/

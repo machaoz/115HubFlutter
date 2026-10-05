@@ -7,6 +7,7 @@
 #   ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
 #   ./lunch gui                只构建 gui 模块（Flutter，默认 debug）
 #   ./lunch gui --release      只构建 gui 模块（release）
+#   ./lunch quality            格式 + 分析 + 纯 Dart 护栏 + 非原生测试
 #   ./lunch baselib|network|system|native   只构建对应原生模块（自动带依赖）
 #   ./lunch clean              清理 .cache/
 #   ./lunch distclean          清理 .cache/ debug/ release/
@@ -152,6 +153,35 @@ lunch_native() {
 }
 
 # ---------------------------------------------------------------------------
+# Flutter 质量门禁：格式 / 静态分析 / 纯 Dart 护栏 / 非原生测试
+# ---------------------------------------------------------------------------
+lunch_quality() {
+  [ -d "$GUI_DIR" ] || fail "gui 模块不存在：$GUI_DIR"
+  command -v "$FLUTTER_BIN" >/dev/null 2>&1 || fail "flutter 不在 PATH"
+
+  say "运行 Flutter 质量门禁"
+  (
+    cd "$GUI_DIR"
+    "$FLUTTER_BIN" pub get
+    # 格式门禁：失败就停，但要说明白是「格式未对齐」而非静默中止（否则 all 分支
+    # 会在此处断掉，后续 lunch_package 不执行，表现为 debug/ 产物时间不变）。
+    if ! dart format --output=none --set-exit-if-changed lib test .tools; then
+      fail "dart format 校验未通过：上方列出的文件格式未对齐。执行 'dart format lib test .tools' 修复后重试。"
+    fi
+    "$FLUTTER_BIN" analyze
+    dart run .tools/qr_classify_check.dart
+    dart run .tools/pan115_task_check.dart
+    dart run .tools/search_fallback_check.dart
+    dart run .tools/source_protocol_check.dart
+    dart run .tools/person_catalog_check.dart
+    dart run .tools/session_cookie_check.dart
+    dart run .tools/shell_layout_check.dart
+    "$FLUTTER_BIN" test --exclude-tags native
+  )
+  ok "Flutter 质量门禁通过"
+}
+
+# ---------------------------------------------------------------------------
 # Flutter 构建：lunch_gui <debug|release>
 # ---------------------------------------------------------------------------
 lunch_gui() {
@@ -160,9 +190,27 @@ lunch_gui() {
   [ -f "$GUI_DIR/pubspec.yaml" ] || fail "$GUI_DIR 下没有 pubspec.yaml"
 
   command -v "$FLUTTER_BIN" >/dev/null 2>&1 || fail "flutter 不在 PATH"
+  lunch_quality
 
-  say "flutter build windows --$mode"
-  (cd "$GUI_DIR" && "$FLUTTER_BIN" build windows "--$mode")
+  # 版本信息构建期注入（BuildInfo 读取，避免 UI 侧硬编码）
+  # 注意：FLUTTER_VERSION / APP_VERSION 为框架保留键，必须用 HUB_ 前缀
+  local fver appver
+  fver="$("$FLUTTER_BIN" --version 2>/dev/null | head -1 | awk '{print $2}')"
+  [ -n "$fver" ] || fver="未知"
+  appver="$(sed -n 's/^version:[[:space:]]*\([0-9][^+[:space:]]*\).*/\1/p' "$GUI_DIR/pubspec.yaml" | head -1)"
+  [ -n "$appver" ] || appver="0.0.0"
+
+  say "flutter build windows --$mode（app=$appver flutter=$fver）"
+  # 用子 shell 隔离：确保 Flutter 构建跑在干净环境里，不继承 lunch_native 导出的
+  # MSVC 变量（INCLUDE/LIB/LIBPATH 等）。跨机器上这些变量若指向与 Flutter 自探测
+  # 不同的 VS 实例，会导致 cl.exe 编译失败（MSB6006: CL.exe 退出代码 2）。
+  if ! (cd "$GUI_DIR" && env -u INCLUDE -u LIB -u LIBPATH -u CL \
+        "$FLUTTER_BIN" build windows "--$mode" \
+        --dart-define=HUB_APP_VERSION="$appver" \
+        --dart-define=HUB_FLUTTER_VERSION="$fver"); then
+    fail "Flutter 构建失败。若报 MSB6006（CL.exe 退出代码 2）等编译异常，多为增量构建状态损坏，
+     请先执行 ./lunch clean 后重试；仍失败再删除 $GUI_DIR/build 目录重试。"
+  fi
   local runner="$GUI_DIR/build/windows/x64/runner"
   [ "$mode" = "release" ] && runner="$runner/Release" || runner="$runner/Debug"
   [ -d "$runner" ] || fail "flutter 产物目录不存在：$runner"
@@ -220,13 +268,17 @@ cmd=$(echo "$cmd" | tr '[:upper:]' '[:lower:]')
 
 case "$cmd" in
   all)
-    lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" all
+    # 子 shell 隔离原生构建：其导入的 MSVC 环境不泄漏给后续 flutter 构建
+    ( lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" all )
     lunch_gui "$MODE"
     lunch_package "$MODE"
     ok "全量完成（$MODE）"
     ;;
   gui)
     lunch_gui "$MODE"
+    ;;
+  quality|check|test)
+    lunch_quality
     ;;
   baselib|network|system)
     lunch_native "$( [ "$MODE" = "release" ] && echo Release || echo Debug )" "hub_$cmd"
@@ -239,10 +291,19 @@ case "$cmd" in
     ;;
   clean)
     rm -rf "$CACHE_DIR"
-    ok "已清理 $CACHE_DIR"
+    # 一并清理 Flutter 构建缓存（build/、.dart_tool 等），用于修复增量构建状态损坏
+    # 导致的编译失败（如 MSB6006: CL.exe 退出代码 2）
+    if [ -d "$GUI_DIR" ] && command -v "$FLUTTER_BIN" >/dev/null 2>&1; then
+      (cd "$GUI_DIR" && "$FLUTTER_BIN" clean >/dev/null 2>&1) || true
+      say "已执行 flutter clean（$GUI_DIR）"
+    fi
+    ok "已清理 $CACHE_DIR + Flutter 构建缓存"
     ;;
   distclean)
     rm -rf "$CACHE_DIR" "$PROJECT_DIR/debug" "$PROJECT_DIR/release"
+    if [ -d "$GUI_DIR" ] && command -v "$FLUTTER_BIN" >/dev/null 2>&1; then
+      (cd "$GUI_DIR" && "$FLUTTER_BIN" clean >/dev/null 2>&1) || true
+    fi
     ok "已清理全部构建产物"
     ;;
   help|-h|--help|"")
@@ -251,11 +312,12 @@ lunch —— 115HubFlutter 构建编排
 
   ./lunch all                全量编译打包（默认 debug）→ debug/Magnetic115Hub/
   ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
-  ./lunch gui [--release]    只构建 gui（Flutter）
+  ./lunch gui [--release]    只构建 gui（Flutter，构建前自动执行质量门禁）
+  ./lunch quality            运行格式、静态分析、纯 Dart 护栏与非原生测试
   ./lunch native [--release] 只构建原生模块 + hub_native.dll（含冒烟）
   ./lunch baselib|network|system [--release]   只构建对应原生模块
-  ./lunch clean              清理 .cache/
-  ./lunch distclean          清理 .cache/ debug/ release/
+  ./lunch clean              清理 .cache/ 与 Flutter 构建缓存（build/、.dart_tool）
+  ./lunch distclean          清理 .cache/ debug/ release/ 与 Flutter 构建缓存
   ./lunch help               本帮助
 
 环境变量：HUB_TOOLCHAIN=msvc|mingw 强制工具链（默认自动：MSVC 优先，回退 MinGW）

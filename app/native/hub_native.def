@@ -5,7 +5,13 @@ EXPORTS
     hub_sys_os_version
     hub_sys_app_data_dir
     hub_sys_single_instance_busy
+    hub_secret_protect
+    hub_secret_unprotect
+    hub_secret_backend
     hub_parse_magnet_infohash
     hub_parse_pan115_sha1
     hub_net_rate_acquire
+    hub_log_init
+    hub_log_write
+    hub_log_current_file
     hub_sha1_file

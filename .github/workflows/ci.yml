@@ -1,0 +1,66 @@
+name: Flutter quality gate
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.3"
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Dart dependencies
+        working-directory: app/gui
+        run: flutter pub get
+
+      - name: Check formatting
+        working-directory: app/gui
+        run: dart format --output=none --set-exit-if-changed lib test .tools
+
+      - name: Analyze
+        working-directory: app/gui
+        run: flutter analyze
+
+      - name: Run pure Dart regression guards
+        working-directory: app/gui
+        run: |
+          dart run .tools/qr_classify_check.dart
+          dart run .tools/pan115_task_check.dart
+          dart run .tools/search_fallback_check.dart
+          dart run .tools/source_protocol_check.dart
+          dart run .tools/person_catalog_check.dart
+          dart run .tools/session_cookie_check.dart
+          dart run .tools/shell_layout_check.dart
+
+      - name: Build native library (hub_native.dll)
+        # 用 Visual Studio 生成器：windows-latest 预装 VS，无需 cl.exe 在 PATH；
+        # 多配置生成器的产物落在 <build>/<Config>/ 下，故用递归查找定位 dll。
+        run: |
+          cmake -S . -B .cache/ci -G "Visual Studio 17 2022" -A x64
+          cmake --build .cache/ci --config Debug --target hub_native
+          $dll = Get-ChildItem -Path .cache/ci -Recurse -Filter hub_native.dll | Select-Object -First 1
+          if (-not $dll) { throw 'hub_native.dll not found after build' }
+          Copy-Item $dll.FullName app/gui/hub_native.dll -Force
+
+      - name: Run Flutter tests (includes native-tagged FFI/DPAPI tests)
+        working-directory: app/gui
+        run: flutter test
+
+      - name: Build Windows application
+        working-directory: app/gui
+        run: flutter build windows --debug

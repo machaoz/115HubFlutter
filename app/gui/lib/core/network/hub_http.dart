@@ -20,12 +20,14 @@ class HubHttp {
   HubHttp({required this.settings});
 
   NetworkSettings settings;
-  late final Dio _dio = Dio(BaseOptions(
-    connectTimeout: Duration(milliseconds: settings.timeoutMs),
-    receiveTimeout: Duration(milliseconds: settings.timeoutMs),
-    responseType: ResponseType.plain,
-    validateStatus: (s) => s != null && s < 500,
-  ));
+  late final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: Duration(milliseconds: settings.timeoutMs),
+      receiveTimeout: Duration(milliseconds: settings.timeoutMs),
+      responseType: ResponseType.plain,
+      validateStatus: (s) => s != null && s < 500,
+    ),
+  );
 
   /// host -> 下次可请求时间（令牌桶，简化为窗口间隔）
   final Map<String, DateTime> _nextAllowed = <String, DateTime>{};
@@ -45,7 +47,7 @@ class HubHttp {
           final c = HttpClient();
           if (s.proxy.isNotEmpty) {
             c.findProxy = (uri) => 'PROXY ${s.proxy}';
-            c.badCertificateCallback = (_, __, ___) => false;
+            c.badCertificateCallback = (_, _, _) => false;
           }
           return c;
         },
@@ -65,8 +67,9 @@ class HubHttp {
     if (next != null && now.isBefore(next)) {
       await Future<void>.delayed(next.difference(now));
     }
-    _nextAllowed[host] =
-        DateTime.now().add(Duration(milliseconds: (1000 / rps).round()));
+    _nextAllowed[host] = DateTime.now().add(
+      Duration(milliseconds: (1000 / rps).round()),
+    );
   }
 
   /// 拟人化停顿（降低被风控概率，Electron 版口径 240–760ms）
@@ -87,11 +90,13 @@ class HubHttp {
     if (humanize) await this.humanize();
     return _dio.get<T>(
       url,
-      options: Options(headers: <String, dynamic>{
-        'user-agent': ua,
-        'accept-language': 'zh-CN,zh;q=0.9',
-        ...?headers,
-      }),
+      options: Options(
+        headers: <String, dynamic>{
+          'user-agent': ua,
+          'accept-language': 'zh-CN,zh;q=0.9',
+          ...?headers,
+        },
+      ),
       cancelToken: cancelToken,
     );
   }

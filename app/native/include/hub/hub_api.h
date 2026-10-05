@@ -41,6 +41,19 @@ const char* hub_sys_app_data_dir(void);
 // 单实例探测：已被其他进程持有返回 1，否则 0（本函数只探测不持有，避免冒充主进程）
 int32_t hub_sys_single_instance_busy(const char* mutex_name);
 
+// ---- 系统级密钥保护（system 模块，Windows DPAPI）----
+// 语义：由操作系统按「当前用户」加密，本进程不生成也不保存密钥。
+//   *out_len 为 in/out：入参是 out 的容量，出参是实际（或所需）长度。
+//   成功返回 HUB_OK；容量不足返回 HUB_ERR_BUFFER_TOO_SMALL 并把所需长度写入 *out_len。
+//   无该能力（非 Windows / DPAPI 失败）返回 HUB_ERR_NOT_IMPLEMENTED 或 HUB_ERR_IO。
+int32_t hub_secret_protect(const uint8_t* plain, int32_t plain_len, uint8_t* out,
+                           int32_t* out_len);
+int32_t hub_secret_unprotect(const uint8_t* blob, int32_t blob_len, uint8_t* out,
+                             int32_t* out_len);
+
+// 后端标识写入 buf（"dpapi" / "none"），返回值同 hub_sys_os_version
+int32_t hub_secret_backend(char* buf, int32_t len);
+
 // ---- 解析（baselib 模块）----
 // 解析 magnet 链接：成功把 40 位 infohash 写入 out_hex41，返回 40；失败返回负错误码
 int32_t hub_parse_magnet_infohash(const char* uri, char* out_hex41);
@@ -51,6 +64,20 @@ int32_t hub_parse_pan115_sha1(const char* uri, char* out_hex41);
 // ---- 网络（network 模块）----
 // host 级限流：返回需等待毫秒数（0 = 立即）
 int32_t hub_net_rate_acquire(const char* host, int32_t min_interval_ms);
+
+// ---- 日志（hub_log 模块）----
+// 初始化原生日志：
+//   dir       日志目录（UTF-8），传 NULL 或空串表示只输出到 stderr
+//   min_level 0=debug 1=info 2=warn 3=error
+// 返回 HUB_OK；目录不可写时不失败（降级为 stderr），仍返回 HUB_OK
+// 约定：Dart 侧传入「安装路径/.log」，与 Dart 侧 hub.log 落同一目录便于现场排查
+int32_t hub_log_init(const char* dir, int32_t min_level);
+
+// 写一行原生日志（level 语义同上）。Dart 侧一般不需要调用，供冒烟/自测使用
+int32_t hub_log_write(int32_t level, const char* message);
+
+// 当前正在写的日志文件绝对路径（静态缓冲）；未启用文件输出时返回空串
+const char* hub_log_current_file(void);
 
 // ---- 长任务占位（vNext）----
 // 大文件 SHA-1：首版未实现（返回 HUB_ERR_NOT_IMPLEMENTED），接口位保留给秒传校验

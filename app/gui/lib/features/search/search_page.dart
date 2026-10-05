@@ -8,12 +8,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/hub_database.dart';
 import '../../core/db/repos.dart';
+import '../../core/db/settings.dart';
 import '../../sources/source.dart';
 import '../../state/providers.dart';
 import '../../ui/theme.dart';
 import '../../ui/widgets.dart';
-import '../discover/discover_page.dart' show searchSeedNotifier;
 import 'search_orchestrator.dart';
+import 'search_seed.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key});
@@ -31,11 +32,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   String? _relayHint;
   bool _inputWasChinese = false;
 
+  /// 历史检索记录（W2）
+  List<String> _history = const <String>[];
+
   @override
   void initState() {
     super.initState();
     searchSeedNotifier.addListener(_consumeSeed);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeSeed());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadHistory();
+      _consumeSeed();
+    });
   }
 
   @override
@@ -45,13 +52,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     super.dispose();
   }
 
-  /// 「发现」页海报详情 → 去搜索
+  void _loadHistory() {
+    final db = ref.read(appDatabaseProvider).maybeValue;
+    if (db == null) return;
+    _history = HistoryRepo(db).list(limit: 20);
+  }
+
+  /// 「发现」页海报详情 / 热搜榜 → 去搜索（B1：带展示名 + 原名回退）
   void _consumeSeed() {
     final seed = searchSeedNotifier.value;
     if (seed == null) return;
     searchSeedNotifier.value = null;
-    _ctrl.text = seed;
-    _start();
+    _ctrl.text = seed.primary;
+    _start(seed: seed);
   }
 
   List<SourceLite> _sources() {
@@ -60,20 +73,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     return SourceRepo(db).listAll();
   }
 
-  Future<void> _start() async {
+  /// 执行检索（B1 两步式）：
+  ///   1. 用当前输入（发现页跳转时即**展示名/中文**）检索；
+  ///   2. 结果为空时按 `nextSearchFallback` 回退到原名 / 译名，**只回退一轮**。
+  Future<void> _start({SearchSeed? seed}) async {
     final raw = _ctrl.text.trim();
     // 错误态：保留用户输入，仅高亮 —— 绝不清空
     if (raw.isEmpty) {
       setState(() => _error = 'empty');
       return;
     }
-    setState(() {
-      _error = null;
-      _running = true;
-      _update = null;
-      _relayHint = null;
-      _inputWasChinese = _looksChinese(raw);
-    });
     final db = ref.read(appDatabaseProvider).maybeValue;
     final settings = ref.read(appSettingsProvider);
     final sources = _sources();
@@ -85,28 +94,71 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return;
     }
 
-    // CJ1-0007 中文译名回源：先取原文名，再用原文名检索索引源
-    String query = raw;
-    if (_inputWasChinese) {
-      final original = await _doubanOriginalName(raw, settings.network.proxy);
-      if (original != null && original.isNotEmpty && original != raw) {
-        query = original;
+    setState(() {
+      _error = null;
+      _running = true;
+      _update = null;
+      _relayHint = null;
+      _inputWasChinese = _looksChinese(raw);
+    });
+
+    if (db != null) {
+      HistoryRepo(db).add(raw);
+      _loadHistory();
+    }
+
+    var used = raw;
+    var u = await _runOnce(used, sources, settings);
+    if (!mounted) return;
+
+    if (u.groups.isEmpty) {
+      // 中文输入但发现页没给原名时，自己回源豆瓣取译名
+      String? resolved;
+      if (_inputWasChinese && (seed?.fallback ?? '').isEmpty) {
+        resolved = await _doubanOriginalName(used, settings.network.proxy);
         if (!mounted) return;
-        setState(() => _relayHint = original);
+      }
+      final fb = nextSearchFallback(
+        hasResults: u.groups.isNotEmpty,
+        used: used,
+        seedFallback: seed?.fallback,
+        resolvedOriginal: resolved,
+      );
+      if (fb != null) {
+        setState(() => _relayHint = fb);
+        used = fb;
+        u = await _runOnce(used, sources, settings);
+        if (!mounted) return;
       }
     }
 
-    _orch = SearchOrchestrator(sources: sources, settings: settings);
-    final orch = _orch!;
+    setState(() {
+      _update = u;
+      _running = false;
+    });
+  }
 
-    if (db != null) HistoryRepo(db).add(raw);
-
+  /// 单轮流式检索。返回最后一帧更新（流结束即 done=true）。
+  Future<SearchUpdate> _runOnce(
+    String query,
+    List<SourceLite> sources,
+    AppSettings settings,
+  ) async {
+    final orch = SearchOrchestrator(sources: sources, settings: settings);
+    _orch = orch;
+    SearchUpdate? last;
     await for (final u in orch.run(query)) {
-      if (!mounted) return;
+      if (!mounted) break;
+      last = u;
       setState(() => _update = u);
     }
-    if (!mounted) return;
-    setState(() => _running = false);
+    return last ??
+        SearchUpdate(
+          requestId: orch.currentRequestId,
+          groups: const <List<ResourceItem>>[],
+          sources: const <SourceStatus>[],
+          done: true,
+        );
   }
 
   void _stop() {
@@ -115,19 +167,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     if (mounted) showHubToast(context, '已取消，迟到批次已丢弃');
   }
 
+  void _useHistory(String q) {
+    _ctrl.text = q;
+    _start();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
     final sources = _sources();
     final db = ref.read(appDatabaseProvider).maybeValue;
+    final history = _history;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(30, 26, 30, 40),
       children: <Widget>[
         Text('聚合搜索', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 4),
-        Text('多源并发 · 流式返回 · 可取消 · 去重排序（分桶：磁力/秒传/分享）',
-            style: TextStyle(color: t.textDim)),
+        Text(
+          '多源并发 · 流式返回 · 可取消 · 去重排序（分桶：磁力/秒传/分享）· 中文优先、原名兜底',
+          style: TextStyle(color: t.textDim),
+        ),
         const SizedBox(height: 16),
         // 搜索框
         Semantics(
@@ -162,6 +222,56 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ],
           ),
         ),
+        // 历史搜索记录（W2）
+        if (history.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          Row(
+            children: <Widget>[
+              Icon(Icons.history, size: 16, color: t.textDim),
+              const SizedBox(width: 6),
+              Text('搜索历史', style: TextStyle(color: t.textDim, fontSize: 13)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '点击回填并检索 · 点 × 删除单条',
+                  style: TextStyle(color: t.textDim, fontSize: 12),
+                ),
+              ),
+              GhostButton(
+                label: '清空历史',
+                icon: Icons.delete_sweep_outlined,
+                onPressed: () {
+                  final d = ref.read(appDatabaseProvider).maybeValue;
+                  if (d == null) return;
+                  HistoryRepo(d).clear();
+                  setState(() => _history = const <String>[]);
+                  showHubToast(context, '搜索历史已清空');
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final h in history)
+                _HistoryChip(
+                  text: h,
+                  t: t,
+                  onTap: () => _useHistory(h),
+                  onDelete: () {
+                    final d = ref.read(appDatabaseProvider).maybeValue;
+                    if (d == null) return;
+                    HistoryRepo(d).remove(h);
+                    setState(
+                      () => _history = List<String>.from(_history)..remove(h),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 12),
         // 源状态
         if (sources.isNotEmpty)
@@ -177,7 +287,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             padding: const EdgeInsets.only(bottom: 10),
             child: HubCard(
               child: Text(
-                '已按译名回源：$_relayHint 检索',
+                '展示名无结果，已回退原名检索：$_relayHint',
                 style: TextStyle(color: t.cyan),
               ),
             ),
@@ -244,8 +354,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           padding: const EdgeInsets.only(bottom: 10),
           child: Row(
             children: <Widget>[
-              Text('共 ${u.groups.length} 条',
-                  style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+              Text(
+                '共 ${u.groups.length} 条',
+                style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(width: 10),
               if (!u.done)
                 Row(
@@ -256,7 +368,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                     const SizedBox(width: 6),
-                    Text('流式返回中…', style: TextStyle(color: t.textDim, fontSize: 13)),
+                    Text(
+                      '流式返回中…',
+                      style: TextStyle(color: t.textDim, fontSize: 13),
+                    ),
                   ],
                 ),
             ],
@@ -289,9 +404,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   String? _extractLatin(String s) {
     if (s.isEmpty) return null;
     String? best;
-    for (final m in RegExp(r"[A-Za-z0-9][A-Za-z0-9'’:\.\- ]*",
-            caseSensitive: false)
-        .allMatches(s)) {
+    for (final m in RegExp(
+      r"[A-Za-z0-9][A-Za-z0-9'’:\.\- ]*",
+      caseSensitive: false,
+    ).allMatches(s)) {
       final t = m.group(0)!.trim();
       if (t.isNotEmpty && (best == null || t.length > best.length)) best = t;
     }
@@ -300,26 +416,31 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   Future<String?> _doubanOriginalName(String kw, String proxy) async {
     try {
-      final d = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-        responseType: ResponseType.plain,
-      ));
+      final d = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+          responseType: ResponseType.plain,
+        ),
+      );
       if (proxy.isNotEmpty) {
-        d.httpClientAdapter = IOHttpClientAdapter(createHttpClient: () {
-          final c = HttpClient();
-          c.findProxy = (uri) => 'PROXY $proxy';
-          return c;
-        });
+        d.httpClientAdapter = IOHttpClientAdapter(
+          createHttpClient: () {
+            final c = HttpClient();
+            c.findProxy = (uri) => 'PROXY $proxy';
+            return c;
+          },
+        );
       }
       final res = await d.get<String>(
         'https://movie.douban.com/j/subject_suggest?q=${Uri.encodeQueryComponent(kw)}',
-        options: Options(headers: <String, String>{
-          'user-agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          'referer': 'https://movie.douban.com/',
-          'accept': 'application/json, text/plain, */*',
-        }),
+        options: Options(
+          headers: <String, String>{
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'referer': 'https://movie.douban.com/',
+            'accept': 'application/json, text/plain, */*',
+          },
+        ),
       );
       final data = jsonDecode(res.data ?? '[]');
       if (data is List && data.isNotEmpty) {
@@ -335,6 +456,73 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       // 取译名失败则回退原文检索
     }
     return null;
+  }
+}
+
+/// 历史记录胶囊：左半区点击回填检索，右侧 × 删除该条（W2）
+class _HistoryChip extends StatelessWidget {
+  const _HistoryChip({
+    required this.text,
+    required this.t,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final String text;
+  final AppTokens t;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: t.surface,
+        border: Border.all(color: t.border),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Semantics(
+            button: true,
+            label: '用「$text」搜索',
+            child: InkWell(
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(999),
+              ),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 7, 6, 7),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: t.text),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: '删除「$text」',
+            child: InkWell(
+              borderRadius: const BorderRadius.horizontal(
+                right: Radius.circular(999),
+              ),
+              onTap: onDelete,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(2, 7, 10, 7),
+                child: Icon(Icons.close, size: 13, color: t.textDim),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -370,7 +558,11 @@ class _SourceChip extends StatelessWidget {
 }
 
 class _ResultRow extends StatelessWidget {
-  const _ResultRow({required this.item, required this.groupSize, required this.db});
+  const _ResultRow({
+    required this.item,
+    required this.groupSize,
+    required this.db,
+  });
   final ResourceItem item;
   final int groupSize;
   final HubDatabase? db;
@@ -396,7 +588,10 @@ class _ResultRow extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: t.textHi, fontWeight: FontWeight.w600, fontSize: 15),
+                    color: t.textHi,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
                 ),
                 const SizedBox(height: 7),
                 Wrap(
@@ -405,7 +600,11 @@ class _ResultRow extends StatelessWidget {
                   children: <Widget>[
                     if (item.resolution != null) _Tag(item.resolution!, t),
                     if (item.codec != null) _Tag(item.codec!, t),
-                    _Tag(db == null ? '' : '', t, size: fmtBytes(item.sizeBytes)),
+                    _Tag(
+                      db == null ? '' : '',
+                      t,
+                      size: fmtBytes(item.sizeBytes),
+                    ),
                     if (item.season != null) _Tag('S${item.season}', t),
                     _Tag(item.sourceId, t),
                     if (groupSize > 1) _Tag('×$groupSize', t),
@@ -421,10 +620,11 @@ class _ResultRow extends StatelessWidget {
                 icon: Icons.copy_all_outlined,
                 label: '复制',
                 t: t,
-                onTap: () {
-                  showHubToast(
-                      context, '已复制：${item.copyTarget.split('&').first}');
-                },
+                onTap: () => copyToClipboard(
+                  context,
+                  item.copyTarget,
+                  successLabel: '已复制：${copyPreview(item.copyTarget)}',
+                ),
               ),
               const SizedBox(width: 8),
               _ActBtn(
@@ -487,14 +687,22 @@ class _Tag extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-            color: t.cyan, fontSize: 11.5, fontWeight: FontWeight.w700),
+          color: t.cyan,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
 }
 
 class _ActBtn extends StatelessWidget {
-  const _ActBtn({required this.icon, required this.label, required this.t, required this.onTap});
+  const _ActBtn({
+    required this.icon,
+    required this.label,
+    required this.t,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final AppTokens t;
@@ -502,25 +710,25 @@ class _ActBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        button: true,
-        label: label,
-        child: InkWell(
+    button: true,
+    label: label,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(11),
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border.all(color: t.border),
           borderRadius: BorderRadius.circular(11),
-          onTap: onTap,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: t.surface,
-              border: Border.all(color: t.border),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            alignment: Alignment.center,
-            child: Tooltip(
-              message: label,
-              child: Icon(icon, size: 19, color: t.textHi),
-            ),
-          ),
         ),
-      );
+        alignment: Alignment.center,
+        child: Tooltip(
+          message: label,
+          child: Icon(icon, size: 19, color: t.textHi),
+        ),
+      ),
+    ),
+  );
 }

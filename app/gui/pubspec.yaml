@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 2.0.0+5
 
 environment:
   sdk: ^3.13.3
@@ -45,6 +45,14 @@ dependencies:
   collection: ^1.19.1
   crypto: ^3.0.7
   window_manager: ^0.5.2
+
+  # 【已移除】flutter_secure_storage：其依赖链
+  # flutter_secure_storage_windows → path_provider → path_provider_foundation →
+  # objective_c 会给本工程引入 native-assets 构建钩子（并要求 VS 附带 C++ ATL 库），
+  # 而本工程的验证链路依赖 `dart run .tools/*_check.dart`（受限环境无法构建钩子），
+  # 且本项目为 Windows-only，无需跨平台插件。
+  # 115 会话凭证改由自有原生模块 app/system/src/secret.cpp 走 Windows DPAPI 加密，
+  # 经 hub_native.dll 的 hub_secret_protect/hub_secret_unprotect 导出，零新增依赖。
 
 dev_dependencies:
   flutter_test:

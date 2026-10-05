@@ -49,6 +49,49 @@ int main() {
   // vNext 占位
   CHECK(hub_sha1_file(nullptr, nullptr, nullptr) == HUB_ERR_NOT_IMPLEMENTED, "sha1 placeholder");
 
-  std::printf("[SMOKE-OK] version=%s os=%s appdata=%s\n", ver, os, data_dir);
+  // ---- 系统级密钥保护（DPAPI）：加密 → 解密 往返 + 密文非明文 + 篡改必须失败 ----
+  char backend[16] = {0};
+  CHECK(hub_secret_backend(backend, sizeof(backend)) > 0, "secret_backend");
+  CHECK(std::strcmp(backend, "dpapi") == 0, "secret_backend value");
+
+  const char* plain = "UID=1_A1_2; CID=abcdef; SEID=zzzz";
+  const int32_t plain_len = static_cast<int32_t>(std::strlen(plain));
+
+  // 第一次调用只问容量（out=nullptr）
+  int32_t cap = 0;
+  CHECK(hub_secret_protect(reinterpret_cast<const uint8_t*>(plain), plain_len, nullptr, &cap) ==
+            HUB_ERR_BUFFER_TOO_SMALL,
+        "secret_protect size query");
+  CHECK(cap > plain_len, "ciphertext longer than plaintext");
+
+  uint8_t cipher[512] = {0};
+  int32_t cipher_len = sizeof(cipher);
+  CHECK(hub_secret_protect(reinterpret_cast<const uint8_t*>(plain), plain_len, cipher,
+                           &cipher_len) == HUB_OK,
+        "secret_protect");
+  CHECK(cipher_len > plain_len, "secret_protect length");
+  CHECK(std::memcmp(cipher, plain, static_cast<size_t>(plain_len)) != 0,
+        "ciphertext must not equal plaintext");
+
+  uint8_t back[512] = {0};
+  int32_t back_len = sizeof(back);
+  CHECK(hub_secret_unprotect(cipher, cipher_len, back, &back_len) == HUB_OK,
+        "secret_unprotect");
+  CHECK(back_len == plain_len, "secret_unprotect length");
+  CHECK(std::memcmp(back, plain, static_cast<size_t>(plain_len)) == 0, "roundtrip value");
+
+  // 篡改密文（翻转最后一字节）必须解密失败，绝不返回脏数据
+  cipher[cipher_len - 1] ^= 0xFF;
+  int32_t tampered_len = sizeof(back);
+  CHECK(hub_secret_unprotect(cipher, cipher_len, back, &tampered_len) != HUB_OK,
+        "tampered blob rejected");
+  cipher[cipher_len - 1] ^= 0xFF;
+
+  // 入参边界
+  CHECK(hub_secret_unprotect(nullptr, 0, back, &tampered_len) == HUB_ERR_INVALID_ARG,
+        "unprotect invalid arg");
+
+  std::printf("[SMOKE-OK] version=%s os=%s appdata=%s secret=%s\n", ver, os, data_dir,
+              backend);
   return 0;
 }

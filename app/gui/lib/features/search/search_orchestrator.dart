@@ -11,7 +11,12 @@ import 'search_engine.dart';
 enum SourceState { pending, running, ok, failed, skipped }
 
 class SourceStatus {
-  const SourceStatus({required this.id, required this.name, required this.state, this.message = ''});
+  const SourceStatus({
+    required this.id,
+    required this.name,
+    required this.state,
+    this.message = '',
+  });
   final String id;
   final String name;
   final SourceState state;
@@ -66,23 +71,26 @@ class _SearchTask {
   final String proxy;
 
   SourceLite toSource() => SourceLite(
-        id: id,
-        name: name,
-        kind: kind == 'pan115' ? ResourceKind.pan115 : ResourceKind.magnet,
-        enabled: enabled,
-        priority: priority,
-        rateLimitRps: rateLimitRps,
-        timeoutMs: timeoutMs,
-        demo: demo,
-        config: config,
-      );
+    id: id,
+    name: name,
+    kind: kind == 'pan115' ? ResourceKind.pan115 : ResourceKind.magnet,
+    enabled: enabled,
+    priority: priority,
+    rateLimitRps: rateLimitRps,
+    timeoutMs: timeoutMs,
+    demo: demo,
+    config: config,
+  );
 }
 
 /// Isolate 入口：必须是顶层函数
 Future<List<RawItem>> _runTask(_SearchTask task) async {
   final source = task.toSource();
   final adapter = adapterFor(source);
-  return adapter.search(task.keyword, AdapterContext(source: source, proxy: task.proxy));
+  return adapter.search(
+    task.keyword,
+    AdapterContext(source: source, proxy: task.proxy),
+  );
 }
 
 /// 搜索编排器
@@ -121,8 +129,11 @@ class SearchOrchestrator {
     }
 
     final allItems = <ResourceItem>[];
-    final queryTokens =
-        keyword.toLowerCase().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toSet();
+    final queryTokens = keyword
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .toSet();
 
     final concurrency = settings.search.concurrency.clamp(1, 16);
     var next = 0;
@@ -133,15 +144,24 @@ class SearchOrchestrator {
       return _execute(task)
           .then((List<RawItem> items) {
             if (my != _requestId) return; // 迟到批次丢弃（PoC-4）
-            allItems.addAll(items.where(_passesBlacklist).map((r) => normalize(r, src)));
-            status[src.id] =
-                SourceStatus(id: src.id, name: src.name, state: SourceState.ok);
+            allItems.addAll(
+              items.where(_passesBlacklist).map((r) => normalize(r, src)),
+            );
+            status[src.id] = SourceStatus(
+              id: src.id,
+              name: src.name,
+              state: SourceState.ok,
+            );
           })
           // ignore: avoid_types_on_closure_parameters
           .catchError((Object e) {
             if (my != _requestId) return;
             status[src.id] = SourceStatus(
-                id: src.id, name: src.name, state: SourceState.failed, message: '$e');
+              id: src.id,
+              name: src.name,
+              state: SourceState.failed,
+              message: '$e',
+            );
             HubLogger.w('源 ${src.id} 检索失败', e);
           });
     }
@@ -150,7 +170,9 @@ class SearchOrchestrator {
       var groups = dedupe(allItems);
       groups = rankGroups(groups, queryTokens);
       final limit = settings.search.maxResults;
-      if (limit > 0 && groups.length > limit) groups = groups.take(limit).toList();
+      if (limit > 0 && groups.length > limit) {
+        groups = groups.take(limit).toList();
+      }
       return groups;
     }
 
@@ -159,8 +181,11 @@ class SearchOrchestrator {
 
       while (pending.length < concurrency && next < enabled.length) {
         final s = enabled[next++];
-        status[s.id] =
-            SourceStatus(id: s.id, name: s.name, state: SourceState.running);
+        status[s.id] = SourceStatus(
+          id: s.id,
+          name: s.name,
+          state: SourceState.running,
+        );
         final task = _SearchTask(
           id: s.id,
           name: s.name,
@@ -206,7 +231,9 @@ class SearchOrchestrator {
     final bl = settings.search.blacklist;
     if (bl.isEmpty) return true;
     for (final w in bl) {
-      if (w.isNotEmpty && r.title.toLowerCase().contains(w.toLowerCase())) return false;
+      if (w.isNotEmpty && r.title.toLowerCase().contains(w.toLowerCase())) {
+        return false;
+      }
     }
     return true;
   }

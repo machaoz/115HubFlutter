@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../core/util/logger.dart';
 import 'theme.dart';
 
 /// 通用玻璃卡片
@@ -121,7 +123,12 @@ class AccentButton extends StatelessWidget {
 }
 
 class GhostButton extends StatelessWidget {
-  const GhostButton({super.key, required this.label, this.onPressed, this.icon});
+  const GhostButton({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.icon,
+  });
 
   final String label;
   final VoidCallback? onPressed;
@@ -233,21 +240,26 @@ class StatusDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          boxShadow: <BoxShadow>[
-            BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 9),
-          ],
-        ),
-      );
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      color: color,
+      shape: BoxShape.circle,
+      boxShadow: <BoxShadow>[
+        BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 9),
+      ],
+    ),
+  );
 }
 
 /// 骨架屏
 class SkeletonBox extends StatefulWidget {
-  const SkeletonBox({super.key, this.width, this.height = 16, this.radius = 10});
+  const SkeletonBox({
+    super.key,
+    this.width,
+    this.height = 16,
+    this.radius = 10,
+  });
   final double? width;
   final double height;
   final double radius;
@@ -295,7 +307,12 @@ class _SkeletonBoxState extends State<SkeletonBox>
 }
 
 class KpiTile extends StatelessWidget {
-  const KpiTile({super.key, required this.value, required this.label, this.color});
+  const KpiTile({
+    super.key,
+    required this.value,
+    required this.label,
+    this.color,
+  });
   final String value;
   final String label;
   final Color? color;
@@ -398,6 +415,115 @@ class HubSegmented<T> extends StatelessWidget {
   }
 }
 
+/// 通用下拉选择器（发现页视图切换 / 设置页启动页共用）
+///
+/// items 元组第三位 = 该选项是否可用：给「待接入的源」占位并灰显，不删 UI 入口
+class HubDropdown<T> extends StatelessWidget {
+  const HubDropdown({
+    super.key,
+    required this.items,
+    required this.value,
+    required this.onChanged,
+    this.label,
+    this.minWidth = 116,
+  });
+
+  final List<(T, String, bool)> items;
+  final T value;
+  final ValueChanged<T> onChanged;
+  final String? label;
+  final double minWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    var currentLabel = items.isNotEmpty ? items.first.$2 : '';
+    for (final it in items) {
+      if (it.$1 == value) {
+        currentLabel = it.$2;
+        break;
+      }
+    }
+    return Container(
+      height: 38,
+      constraints: BoxConstraints(minWidth: minWidth),
+      decoration: BoxDecoration(
+        color: t.surfaceSolid,
+        border: Border.all(color: t.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Semantics(
+        label: label,
+        child: PopupMenuButton<T>(
+          tooltip: label,
+          offset: const Offset(0, 44),
+          padding: EdgeInsets.zero,
+          color: t.surfaceSolid,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: t.border),
+          ),
+          onSelected: onChanged,
+          itemBuilder: (_) => items
+              .map(
+                (it) => PopupMenuItem<T>(
+                  value: it.$1,
+                  enabled: it.$3,
+                  height: 38,
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          it.$2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: it.$3 ? t.textHi : t.textDim,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (it.$1 == value)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: Icon(Icons.check, size: 16, color: t.accent),
+                        ),
+                    ],
+                  ),
+                ),
+              )
+              .toList(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (label != null) ...<Widget>[
+                  Text(
+                    label!,
+                    style: TextStyle(color: t.textDim, fontSize: 12.5),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  currentLabel,
+                  style: TextStyle(
+                    color: t.textHi,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.expand_more, size: 16, color: t.textDim),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 轻量提示（保留输入不被清空）
 void showHubToast(BuildContext context, String msg) {
   ScaffoldMessenger.of(context)
@@ -410,6 +536,40 @@ void showHubToast(BuildContext context, String msg) {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
+}
+
+/// 复制到剪贴板（**真实执行后才提示**，与旧的「只弹 Toast 不落剪贴板」区分）
+///
+/// 行为契约：
+/// - 空文本：提示无内容，不谎报成功
+/// - 成功：提示实际写入的内容摘要
+/// - 失败：提示失败原因并落日志，绝不显示成功
+Future<void> copyToClipboard(
+  BuildContext context,
+  String text, {
+  String? successLabel,
+}) async {
+  final content = text.trim();
+  if (content.isEmpty) {
+    showHubToast(context, '没有可复制的内容');
+    return;
+  }
+  try {
+    await Clipboard.setData(ClipboardData(text: content));
+    if (!context.mounted) return;
+    showHubToast(context, successLabel ?? '已复制');
+  } catch (e) {
+    HubLogger.e('写入剪贴板失败', e);
+    if (!context.mounted) return;
+    showHubToast(context, '复制失败：${e.runtimeType}');
+  }
+}
+
+/// 复制内容的单行摘要（过长截断），用于 Toast 回显，避免整段长链接糊屏
+String copyPreview(String text, {int max = 48}) {
+  final s = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (s.isEmpty) return '';
+  return s.length <= max ? s : '${s.substring(0, max)}…';
 }
 
 /// 格式化容量

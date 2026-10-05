@@ -5,6 +5,6 @@ add_library(hub_network STATIC
 )
 
 target_include_directories(hub_network PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(hub_network PUBLIC hub_baselib)
+target_link_libraries(hub_network PUBLIC hub_baselib hub::log)
 
 hub_apply_common(hub_network)

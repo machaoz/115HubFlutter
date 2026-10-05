@@ -8,17 +8,63 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/util/image_loader.dart';
 import '../../features/search/search_engine.dart';
+import '../../features/search/search_seed.dart';
 import '../../sources/adapters.dart';
 import '../../sources/source.dart';
 import '../../state/providers.dart';
 import '../../ui/theme.dart';
 import '../../ui/widgets.dart';
+import 'person_board.dart' show PersonBoard;
+import 'person_catalog.dart' show kPersonCategories, PersonRole;
 
 const String _doubanBase = 'https://movie.douban.com';
 const String _doubleRexxar = 'https://m.douban.com/rexxar/api/v2/movie';
-const String _doubanReferer = 'https://movie.douban.com/';
-const String _doubanUa =
+const String kDoubanReferer = 'https://movie.douban.com/';
+const String kDoubanUa =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+/// 豆瓣请求 Dio 工厂（海报墙与人物分类共用，**代理 / 超时口径只有一个来源**）
+///
+/// 明文响应（ResponseType.plain）：豆瓣部分接口会返回带 BOM/非标准 JSON，
+/// 交给调用方自行 jsonDecode，避免 Dio 内置解码直接抛错。
+Dio newDoubanDio({required String proxy, required int timeoutMs}) {
+  final d = Dio(
+    BaseOptions(
+      connectTimeout: Duration(milliseconds: timeoutMs),
+      receiveTimeout: Duration(milliseconds: timeoutMs),
+      responseType: ResponseType.plain,
+    ),
+  );
+  if (proxy.isNotEmpty) {
+    d.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final c = HttpClient();
+        c.findProxy = (uri) => 'PROXY $proxy';
+        return c;
+      },
+    );
+  }
+  return d;
+}
+
+/// 剧集侧唯一有效的「全量」tag（豆瓣 tv 侧实测，见 `doubanTagCandidates` 注释）
+const String kDoubanTvAllTag = '热门';
+
+/// 候选 tag 链：**首个有数据的返回，若全部为空则由调用方取最后结果**
+///
+/// 豆瓣 `/j/search_subjects` 实测矩阵（2026-09）：
+/// - movie：热门 / 最新 / 豆瓣高分 + 全部细分 tag 均有数据
+/// - tv：**只有 tv 专属分类 tag 与「热门」有效**；「最新」「豆瓣高分」「电视剧」
+///   乃至空 tag 一律返回 0 条
+///
+/// 因此「剧集 → 全部」绝不能沿用 sort 作 tag（旧实现正是这样，导致页面空白）：
+/// tv 侧固定走全量 tag「热门」，排序仍由 `sort` 参数控制，
+/// 用户感知的「最新 / 高分」维度不受影响。
+List<String> doubanTagCandidates(String type, String sort, String category) {
+  final allTag = type == 'tv' ? kDoubanTvAllTag : sort;
+  if (category == '全部' || category == allTag) return <String>[allTag];
+  return <String>[category, allTag];
+}
 
 /// 海报条目
 class WallSubject {
@@ -75,38 +121,29 @@ class WallDetail {
 /// - 详情主源：GET m.douban.com/rexxar/api/v2/movie/{sid}
 /// - 详情降级：GET {base}/j/subject_abstract
 class DoubanService {
-  DoubanService({String proxy = '', int timeoutMs = 8000})
-      : _proxy = proxy,
-        _timeout = timeoutMs;
+  DoubanService({this.proxy = '', this.timeoutMs = 8000});
 
-  final String _proxy;
-  final int _timeout;
+  /// 可热更新（跟随「设置 - 网络」变化），使 30 分钟结果缓存跨请求复用
+  String proxy;
+  int timeoutMs;
 
   final Map<String, List<WallSubject>> _cache = <String, List<WallSubject>>{};
   final Map<String, DateTime> _cacheAt = <String, DateTime>{};
 
-  Dio get _dio {
-    final d = Dio(BaseOptions(
-      connectTimeout: Duration(milliseconds: _timeout),
-      receiveTimeout: Duration(milliseconds: _timeout),
-      responseType: ResponseType.plain,
-    ));
-    if (_proxy.isNotEmpty) {
-      d.httpClientAdapter = IOHttpClientAdapter(createHttpClient: () {
-        final c = HttpClient();
-        c.findProxy = (uri) => 'PROXY $_proxy';
-        return c;
-      });
-    }
-    return d;
+  /// 手动刷新入口：清空结果缓存（不影响实例的其他请求）
+  void invalidate() {
+    _cache.clear();
+    _cacheAt.clear();
   }
 
+  Dio get _dio => newDoubanDio(proxy: proxy, timeoutMs: timeoutMs);
+
   Map<String, String> get _headers => <String, String>{
-        'user-agent': _doubanUa,
-        'referer': _doubanReferer,
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': 'zh-CN,zh;q=0.9',
-      };
+    'user-agent': kDoubanUa,
+    'referer': kDoubanReferer,
+    'accept': 'application/json, text/plain, */*',
+    'accept-language': 'zh-CN,zh;q=0.9',
+  };
 
   Future<List<WallSubject>> wall({
     required String kind, // 影视 | 剧集
@@ -121,10 +158,9 @@ class DoubanService {
       '豆瓣高分' => 'rank',
       _ => 'recommend',
     };
-    // 选中细分时用分类作 tag；否则用维度本身
-    final tag = (category == '全部') ? sort : category;
+    final attempts = doubanTagCandidates(type, sort, category);
 
-    final key = '$kind|$sorted|$tag|$limit|$pageStart';
+    final key = '$kind|$sorted|${attempts.join('>')}|$limit|$pageStart';
     final cachedAt = _cacheAt[key];
     if (cachedAt != null &&
         DateTime.now().difference(cachedAt).inMinutes < 30 &&
@@ -132,8 +168,8 @@ class DoubanService {
       return _cache[key]!;
     }
 
-
-    String buildUri(String tg) => Uri.parse('$_doubanBase/j/search_subjects').replace(
+    String buildUri(String tg) => Uri.parse('$_doubanBase/j/search_subjects')
+        .replace(
           queryParameters: <String, String>{
             'type': type,
             'tag': tg,
@@ -141,7 +177,8 @@ class DoubanService {
             'page_limit': '$limit',
             'page_start': '$pageStart',
           },
-        ).toString();
+        )
+        .toString();
 
     Future<List<WallSubject>> fetch(String tg) async {
       final res = await _dio.get<String>(
@@ -153,21 +190,26 @@ class DoubanService {
       final list = (json['subjects'] as List<dynamic>? ?? const <dynamic>[]);
       return list
           .whereType<Map<String, dynamic>>()
-          .map((s) => WallSubject(
-                id: s['id']?.toString() ?? '',
-                title: s['title']?.toString() ?? '',
-                rate: s['rate']?.toString() ?? '',
-                cover: s['cover']?.toString() ?? '',
-                url: s['url']?.toString() ?? '',
-              ))
-          .where((e) => e.id.isNotEmpty && e.title.isNotEmpty && e.cover.isNotEmpty)
+          .map(
+            (s) => WallSubject(
+              id: s['id']?.toString() ?? '',
+              title: s['title']?.toString() ?? '',
+              rate: s['rate']?.toString() ?? '',
+              cover: s['cover']?.toString() ?? '',
+              url: s['url']?.toString() ?? '',
+            ),
+          )
+          .where(
+            (e) => e.id.isNotEmpty && e.title.isNotEmpty && e.cover.isNotEmpty,
+          )
           .toList();
     }
 
-    var items = await fetch(tag);
-    // 细分×维度返回 0 条 → 回退为仅按维度再取一次
-    if (items.isEmpty && category != '全部') {
-      items = await fetch(sort);
+    // 依次尝试候选 tag，首个非空结果即采用（会有网络请求）
+    var items = const <WallSubject>[];
+    for (final tg in attempts) {
+      items = await fetch(tg);
+      if (items.isNotEmpty) break;
     }
     _cache[key] = items;
     _cacheAt[key] = DateTime.now();
@@ -179,10 +221,12 @@ class DoubanService {
     try {
       final res = await _dio.get<String>(
         '$_doubleRexxar/$id',
-        options: Options(headers: <String, String>{
-          ..._headers,
-          'referer': 'https://m.douban.com/movie/subject/$id/',
-        }),
+        options: Options(
+          headers: <String, String>{
+            ..._headers,
+            'referer': 'https://m.douban.com/movie/subject/$id/',
+          },
+        ),
       );
       final Map<String, dynamic> r =
           jsonDecode(res.data ?? '{}') as Map<String, dynamic>;
@@ -193,7 +237,10 @@ class DoubanService {
         year: r['year']?.toString() ?? '',
         rate: ((r['rating'] as Map?)?['value'])?.toString() ?? fallback.rate,
         ratingCount: (((r['rating'] as Map?)?['count']) as num?)?.round() ?? 0,
-        cover: pic['normal']?.toString() ?? pic['large']?.toString() ?? fallback.cover,
+        cover:
+            pic['normal']?.toString() ??
+            pic['large']?.toString() ??
+            fallback.cover,
         url: r['url']?.toString() ?? fallback.url,
         genres: _strList(r['genres']),
         countries: _strList(r['countries']),
@@ -228,13 +275,15 @@ class DoubanService {
     }
   }
 
-  List<String> _strList(Object? v) => (v as List?)
+  List<String> _strList(Object? v) =>
+      (v as List?)
           ?.map((e) => e.toString())
           .where((e) => e.isNotEmpty)
           .toList() ??
       const <String>[];
 
-  List<String> _names(Object? v) => (v as List?)
+  List<String> _names(Object? v) =>
+      (v as List?)
           ?.map((e) => (e as Map?)?['name']?.toString() ?? '')
           .where((e) => e.isNotEmpty)
           .toList() ??
@@ -244,11 +293,56 @@ class DoubanService {
 // ---------------------------------------------------------------- 发现页
 
 const List<String> _movieCategories = <String>[
-  '全部', '华语', '欧美', '日本', '韩国', '动画', '喜剧', '爱情', '科幻', '悬疑', '恐怖', '动作', '纪录片'
+  '全部',
+  '华语',
+  '欧美',
+  '日本',
+  '韩国',
+  '动画',
+  '喜剧',
+  '爱情',
+  '科幻',
+  '悬疑',
+  '恐怖',
+  '动作',
+  '纪录片',
 ];
 const List<String> _tvCategories = <String>[
-  '全部', '国产剧', '港剧', '美剧', '英剧', '韩剧', '日剧', '日本动画', '综艺', '纪录片'
+  '全部',
+  '国产剧',
+  '港剧',
+  '美剧',
+  '英剧',
+  '韩剧',
+  '日剧',
+  '日本动画',
+  '综艺',
+  '纪录片',
 ];
+
+/// 发现页「视图来源」：默认海报墙，下拉可切到热搜榜（磁力源榜单）。
+typedef DiscoverViewSpec = ({
+  String id,
+  String label,
+  String short,
+  bool enabled,
+});
+
+/// 【预留扩展】后续接入 TMDB / 自建榜单 / 115 广场等，只需在此追加一项，
+/// 并在 `_DiscoverPageState` 的视图分支里补一处即可，无需改已有结构。
+const List<DiscoverViewSpec> kDiscoverViews = <DiscoverViewSpec>[
+  (id: 'poster', label: '海报墙 · 豆瓣', short: '海报墙', enabled: true),
+  (id: 'person', label: '分类 · 人物分类', short: '人物分类', enabled: true),
+  (id: 'hot', label: '热搜榜 · 磁力链接', short: '热搜榜', enabled: true),
+  (id: 'tmdb', label: 'TMDB 榜单（待接入）', short: 'TMDB', enabled: false),
+];
+
+DiscoverViewSpec _viewSpec(String id) {
+  for (final v in kDiscoverViews) {
+    if (v.id == id) return v;
+  }
+  return kDiscoverViews.first;
+}
 
 class DiscoverPage extends ConsumerStatefulWidget {
   const DiscoverPage({super.key});
@@ -261,6 +355,22 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
   String _kind = '影视';
   String _sort = '热门';
   String _category = '全部';
+
+  /// 当前视图（默认海报墙）
+  String _view = kDiscoverViews.first.id;
+
+  /// 刷新令牌：自增即触发子板块（热搜榜）重新加载
+  int _reloadToken = 0;
+
+  /// 人物分类：角色（导演 / 演员）与类别（全部 / 华语 / 欧美 / 日韩）
+  PersonRole _personRole = PersonRole.director;
+  String _personCategory = kPersonCategories.first;
+
+  /// 刷新令牌：自增即触发人物分类重新取数
+  int _personReloadToken = 0;
+
+  /// 海报墙取数服务做成实例成员，使 30 分钟结果缓存真正生效（原先每次 new 等于无缓存）
+  final DoubanService _svc = DoubanService();
   List<WallSubject> _items = const <WallSubject>[];
   bool _loading = false;
   String? _error;
@@ -276,7 +386,35 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  Future<void> _load({bool force = false}) async {
+  /// 跟随「设置 - 网络」热更新代理与超时
+  void _syncSvc() {
+    final net = ref.read(appSettingsProvider).network;
+    _svc.proxy = net.proxy;
+    _svc.timeoutMs = net.timeoutMs;
+  }
+
+  /// 统一刷新：只刷新当前下拉选中的视图
+  Future<void> _refreshCurrentView() async {
+    final label = _viewSpec(_view).short;
+    if (_view == 'poster') {
+      _svc.invalidate();
+      _syncSvc();
+      await _load();
+    } else {
+      // 人物分类与热搜榜各自持有独立令牌，刷新一个不动另一个
+      setState(() {
+        if (_view == 'person') {
+          _personReloadToken++;
+        } else {
+          _reloadToken++;
+        }
+      });
+    }
+    if (!mounted) return;
+    showHubToast(context, '已刷新「$label」');
+  }
+
+  Future<void> _load() async {
     final settings = ref.read(appSettingsProvider);
     if (!settings.recommend.enabled) {
       setState(() {
@@ -285,6 +423,7 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
       });
       return;
     }
+    _syncSvc();
     setState(() {
       _loading = true;
       _error = null;
@@ -293,11 +432,7 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
       _loadMoreError = null;
     });
     try {
-      final svc = DoubanService(
-        proxy: settings.network.proxy,
-        timeoutMs: settings.network.timeoutMs,
-      );
-      final items = await svc.wall(
+      final items = await _svc.wall(
         kind: _kind,
         sort: _sort,
         category: _category,
@@ -322,17 +457,13 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
 
   Future<void> _loadMore() async {
     if (_loadingMore || _loading || !_hasMore) return;
-    final settings = ref.read(appSettingsProvider);
+    _syncSvc();
     setState(() {
       _loadingMore = true;
       _loadMoreError = null;
     });
     try {
-      final svc = DoubanService(
-        proxy: settings.network.proxy,
-        timeoutMs: settings.network.timeoutMs,
-      );
-      final more = await svc.wall(
+      final more = await _svc.wall(
         kind: _kind,
         sort: _sort,
         category: _category,
@@ -359,11 +490,13 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
   Widget build(BuildContext context) {
     final t = context.t;
     final cats = _kind == '剧集' ? _tvCategories : _movieCategories;
+    final isPoster = _view == 'poster';
+    final isPerson = _view == 'person';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(30, 26, 30, 40),
       children: <Widget>[
-        // 头部 + 维度切换
+        // 头部 + 视图切换 + 刷新
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -375,65 +508,157 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
               children: <Widget>[
                 Text('发现', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 4),
-                Text('豆瓣海报墙 · 点海报看详情 · 一键去搜索',
-                    style: TextStyle(color: t.textDim)),
+                Text(
+                  '海报墙 / 人物分类 / 热搜榜 · 下拉切换 · 点海报看详情 · 一键去搜索',
+                  style: TextStyle(color: t.textDim),
+                ),
               ],
             ),
             Wrap(
               spacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
-                HubSegmented<String>(
-                  label: '大类',
-                  items: const <(String, String)>[('影视', '影视'), ('剧集', '剧集')],
-                  value: _kind,
-                  onChanged: (v) {
-                    setState(() {
-                      _kind = v;
-                      _category = '全部';
-                    });
-                    _load();
-                  },
+                HubDropdown<String>(
+                  label: '视图',
+                  minWidth: 172,
+                  items: kDiscoverViews
+                      .map((v) => (v.id, v.label, v.enabled))
+                      .toList(),
+                  value: _view,
+                  onChanged: (v) => setState(() => _view = v),
                 ),
-                HubSegmented<String>(
-                  label: '排序维度',
-                  items: const <(String, String)>[
-                    ('热门', '热门'),
-                    ('最新', '最新'),
-                    ('豆瓣高分', '高分')
-                  ],
-                  value: _sort,
-                  onChanged: (v) {
-                    setState(() => _sort = v);
-                    _load();
-                  },
+                _RefreshButton(
+                  busy: isPoster && _loading,
+                  label: '刷新${_viewSpec(_view).short}',
+                  onTap: _refreshCurrentView,
                 ),
               ],
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        // 细分分类
-        SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: cats.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, i) => HubChip(
-              label: cats[i],
-              selected: cats[i] == _category,
-              onTap: () {
-                setState(() => _category = cats[i]);
-                _load();
-              },
+        // 海报墙专属筛选区（切到热搜榜时整体隐藏，避免控件语义串味）
+        if (isPoster) ...<Widget>[
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              HubSegmented<String>(
+                label: '大类',
+                items: const <(String, String)>[('影视', '影视'), ('剧集', '剧集')],
+                value: _kind,
+                onChanged: (v) {
+                  setState(() {
+                    _kind = v;
+                    _category = '全部';
+                  });
+                  _load();
+                },
+              ),
+              HubSegmented<String>(
+                label: '排序维度',
+                items: const <(String, String)>[
+                  ('热门', '热门'),
+                  ('最新', '最新'),
+                  ('豆瓣高分', '高分'),
+                ],
+                value: _sort,
+                onChanged: (v) {
+                  setState(() => _sort = v);
+                  _load();
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: cats.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) => HubChip(
+                label: cats[i],
+                selected: cats[i] == _category,
+                onTap: () {
+                  setState(() => _category = cats[i]);
+                  _load();
+                },
+              ),
             ),
           ),
+          const SizedBox(height: 18),
+        ],
+        // 人物分类专属筛选区：角色 + 类别（与海报墙互斥，避免控件语义串味）
+        if (isPerson) ...<Widget>[
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              HubSegmented<PersonRole>(
+                label: '角色',
+                items: const <(PersonRole, String)>[
+                  (PersonRole.director, '导演'),
+                  (PersonRole.actor, '演员'),
+                ],
+                value: _personRole,
+                onChanged: (v) => setState(() => _personRole = v),
+              ),
+              HubSegmented<String>(
+                label: '类别',
+                items: kPersonCategories.map((c) => (c, c)).toList(),
+                value: _personCategory,
+                onChanged: (v) => setState(() => _personCategory = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+        ],
+        // 三个视图都保持存活（Offstage），切换零等待且互不触发刷新
+        Offstage(offstage: !isPoster, child: _buildWallCard(context, t)),
+        if (isPoster) const SizedBox(height: 22),
+        Offstage(
+          offstage: !isPerson,
+          child: PersonBoard(
+            role: _personRole,
+            category: _personCategory,
+            reloadToken: _personReloadToken,
+          ),
         ),
-        const SizedBox(height: 18),
-        _buildBody(context, t),
-        const SizedBox(height: 28),
-        _HotBoard(),
+        if (isPerson) const SizedBox(height: 22),
+        Offstage(
+          offstage: isPoster || isPerson,
+          child: _HotBoard(reloadToken: _reloadToken),
+        ),
       ],
+    );
+  }
+
+  /// 海报墙独立成卡片：把「加载更多」收进卡片内，避免与下方热搜榜分区混淆
+  Widget _buildWallCard(BuildContext context, AppTokens t) {
+    return HubCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Icon(Icons.movie_filter_outlined, color: t.accent, size: 18),
+              const SizedBox(width: 2),
+              Text('豆瓣海报墙', style: Theme.of(context).textTheme.titleMedium),
+              HubChip(label: '$_kind · $_sort · $_category', selected: true),
+              if (_items.isNotEmpty) HubChip(label: '已加载 ${_items.length} 张'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildBody(context, t),
+          const SizedBox(height: 14),
+          _buildLoadMore(t),
+        ],
+      ),
     );
   }
 
@@ -444,9 +669,12 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('首页推荐已关闭', style: TextStyle(color: t.warn, fontWeight: FontWeight.w700)),
+            Text(
+              '首页推荐已关闭',
+              style: TextStyle(color: t.warn, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 6),
-            Text('可在「设置 - 推荐」重新开启。', style: TextStyle(color: t.textDim)),
+            Text('可在「设置 - 首页推荐」重新开启。', style: TextStyle(color: t.textDim)),
           ],
         ),
       );
@@ -458,68 +686,72 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('海报墙加载失败（板块级降级）',
-                style: TextStyle(color: t.danger, fontWeight: FontWeight.w700)),
+            Text(
+              '海报墙加载失败（板块级降级）',
+              style: TextStyle(color: t.danger, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 6),
             Text('失败原因：$_error', style: TextStyle(color: t.textDim)),
             const SizedBox(height: 12),
-            AccentButton(label: '重试', icon: Icons.refresh, onPressed: () => _load()),
+            AccentButton(
+              label: '重试',
+              icon: Icons.refresh,
+              onPressed: () => _load(),
+            ),
           ],
         ),
       );
     }
     if (_items.isEmpty) {
-      return HubCard(
-        child: Text('该分类暂无数据。', style: TextStyle(color: t.textDim)),
-      );
+      return Text('该分类暂无数据。', style: TextStyle(color: t.textDim));
     }
     final proxy = ref.read(appSettingsProvider).network.proxy;
-    return LayoutBuilder(builder: (context, c) {
-      final cross = c.maxWidth > 1200 ? 8 : (c.maxWidth > 860 ? 6 : 4);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: cross,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: 2 / 3,
-            ),
-            itemCount: _items.length,
-            itemBuilder: (context, i) => _PosterCard(
-              subject: _items[i],
-              proxy: proxy,
-              onTap: () => _openDetail(context, _items[i]),
-            ),
+    return LayoutBuilder(
+      builder: (context, c) {
+        final cross = c.maxWidth > 1200 ? 8 : (c.maxWidth > 860 ? 6 : 4);
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cross,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 2 / 3,
           ),
-          const SizedBox(height: 16),
-          _buildLoadMore(t),
-        ],
-      );
-    });
+          itemCount: _items.length,
+          itemBuilder: (context, i) => PosterCard(
+            subject: _items[i],
+            proxy: proxy,
+            onTap: () => _openDetail(context, _items[i]),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildLoadMore(AppTokens t) {
     if (!_hasMore) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text('没有更多了', style: TextStyle(color: t.textDim, fontSize: 13)),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            '海报墙已全部加载（共 ${_items.length} 张）',
+            style: TextStyle(color: t.textDim, fontSize: 13),
+          ),
         ),
       );
     }
     if (_loadingMore) {
-      return const Center(child: SkeletonBox(height: 44, radius: 12, width: 200));
+      return const Center(
+        child: SkeletonBox(height: 44, radius: 12, width: 200),
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Center(
-            child: AccentButton(
-            label: '加载更多',
+          child: AccentButton(
+            label: '加载更多海报',
             icon: Icons.expand_more,
             onPressed: () => _loadMore(),
           ),
@@ -527,117 +759,236 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
         if (_loadMoreError != null) ...<Widget>[
           const SizedBox(height: 10),
           Center(
-            child: Text('加载失败：$_loadMoreError',
-                style: TextStyle(color: t.danger, fontSize: 13)),
+            child: Text(
+              '加载失败：$_loadMoreError',
+              style: TextStyle(color: t.danger, fontSize: 13),
+            ),
           ),
           const SizedBox(height: 8),
-          Center(child: GhostButton(label: '重试', onPressed: () => _loadMore())),
+          Center(
+            child: GhostButton(label: '重试', onPressed: () => _loadMore()),
+          ),
         ],
       ],
     );
   }
 
   Widget _buildSkeleton() {
-    return LayoutBuilder(builder: (context, c) {
-      final cross = c.maxWidth > 1200 ? 8 : (c.maxWidth > 860 ? 6 : 4);
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: cross,
-          crossAxisSpacing: 14,
-          mainAxisSpacing: 14,
-          childAspectRatio: 2 / 3,
-        ),
-        itemCount: cross * 2,
-        itemBuilder: (_, __) => const SkeletonBox(height: 220, radius: 14),
-      );
-    });
+    return LayoutBuilder(
+      builder: (context, c) {
+        final cross = c.maxWidth > 1200 ? 8 : (c.maxWidth > 860 ? 6 : 4);
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cross,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 2 / 3,
+          ),
+          itemCount: cross * 2,
+          itemBuilder: (_, _) => const SkeletonBox(height: 220, radius: 14),
+        );
+      },
+    );
   }
 
   void _openDetail(BuildContext context, WallSubject s) {
     showDialog<void>(
       context: context,
-      builder: (_) => _DetailDialog(subject: s, proxy: ref.read(appSettingsProvider).network.proxy),
+      builder: (_) => SubjectDetailDialog(
+        subject: s,
+        proxy: ref.read(appSettingsProvider).network.proxy,
+      ),
     );
   }
 }
 
-class _PosterCard extends StatelessWidget {
-  const _PosterCard(
-      {required this.subject, required this.proxy, required this.onTap});
+/// 海报卡：鼠标悬停时「凸起 + 边框高亮 + 投影加深」，并浮出「查看详情」提示
+class PosterCard extends StatefulWidget {
+  const PosterCard({
+    super.key,
+    required this.subject,
+    required this.proxy,
+    required this.onTap,
+  });
   final WallSubject subject;
   final String proxy;
   final VoidCallback onTap;
 
   @override
+  State<PosterCard> createState() => PosterCardState();
+}
+
+class PosterCardState extends State<PosterCard> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final t = context.t;
-    return Focus(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Stack(
-          children: <Widget>[
-            Positioned.fill(
-              child: ClipRRect(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Focus(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: _hovered ? 1.05 : 1.0,
+            duration: const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 170),
+              curve: Curves.easeOutCubic,
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                child: RefererImage(
-                  url: subject.cover,
-                  referer: _doubanReferer,
-                  proxy: proxy,
-                  fit: BoxFit.cover,
+                border: Border.all(
+                  color: _hovered ? t.accent : Colors.transparent,
+                  width: 2,
                 ),
+                boxShadow: _hovered
+                    ? <BoxShadow>[
+                        BoxShadow(
+                          color: t.accent.withValues(alpha: 0.34),
+                          blurRadius: 22,
+                          spreadRadius: 1,
+                          offset: const Offset(0, 7),
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.34),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5),
+                        ),
+                      ]
+                    : <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: <Color>[Colors.transparent, Color(0xCC000000)],
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(
+                  fit: StackFit.expand,
                   children: <Widget>[
-                    Text(
-                      subject.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5),
+                    RefererImage(
+                      url: widget.subject.cover,
+                      referer: kDoubanReferer,
+                      proxy: widget.proxy,
+                      fit: BoxFit.cover,
                     ),
-                    if (subject.rate.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 3),
-                        child: Text('★ ${subject.rate}',
-                            style: TextStyle(
-                                color: t.warn,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700)),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: <Color>[
+                              Colors.transparent,
+                              Color(0xCC000000),
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              widget.subject.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                            if (widget.subject.rate.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Text(
+                                  '★ ${widget.subject.rate}',
+                                  style: TextStyle(
+                                    color: t.warn,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
+                    ),
+                    // 悬停蒙层：明确可点，避免「海报看着像图片」的误判
+                    AnimatedOpacity(
+                      opacity: _hovered ? 1 : 0,
+                      duration: const Duration(milliseconds: 170),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                        ),
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 11,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.accent,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: t.accent.withValues(alpha: 0.45),
+                                blurRadius: 14,
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(
+                                Icons.info_outline,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 5),
+                              Text(
+                                '查看详情',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _DetailDialog extends StatelessWidget {
-  const _DetailDialog({required this.subject, required this.proxy});
+class SubjectDetailDialog extends StatelessWidget {
+  const SubjectDetailDialog({
+    super.key,
+    required this.subject,
+    required this.proxy,
+  });
   final WallSubject subject;
   final String proxy;
 
@@ -647,8 +998,9 @@ class _DetailDialog extends StatelessWidget {
     return Dialog(
       backgroundColor: t.surfaceSolid,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: t.border)),
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: t.border),
+      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 700, maxHeight: 560),
         child: Padding(
@@ -661,9 +1013,15 @@ class _DetailDialog extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(subject.title, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      subject.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 12),
-                    Text('详情加载失败：${snap.error}', style: TextStyle(color: t.danger)),
+                    Text(
+                      '详情加载失败：${snap.error}',
+                      style: TextStyle(color: t.danger),
+                    ),
                   ],
                 );
               }
@@ -685,7 +1043,7 @@ class _DetailDialog extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                         child: RefererImage(
                           url: d.cover,
-                          referer: _doubanReferer,
+                          referer: kDoubanReferer,
                           proxy: proxy,
                           fit: BoxFit.cover,
                         ),
@@ -696,12 +1054,17 @@ class _DetailDialog extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Text(d.title, style: Theme.of(context).textTheme.titleMedium),
+                          Text(
+                            d.title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
                           const SizedBox(height: 6),
                           Text(
                             '★ ${d.rate} · ${d.year} · ${d.countries.join('/')}',
                             style: TextStyle(
-                                color: t.warn, fontWeight: FontWeight.w700),
+                              color: t.warn,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           const SizedBox(height: 10),
                           _kv(context, '导演', d.directors.join(' / ')),
@@ -709,12 +1072,17 @@ class _DetailDialog extends StatelessWidget {
                           _kv(context, '类型', d.genres.join(' / ')),
                           if (d.intro.isNotEmpty) ...<Widget>[
                             const SizedBox(height: 10),
-                            Text('简介', style: TextStyle(color: t.textDim, fontSize: 13)),
+                            Text(
+                              '简介',
+                              style: TextStyle(color: t.textDim, fontSize: 13),
+                            ),
                             const SizedBox(height: 4),
-                            Text(d.intro,
-                                maxLines: 6,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: t.text, fontSize: 14)),
+                            Text(
+                              d.intro,
+                              maxLines: 6,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: t.text, fontSize: 14),
+                            ),
                           ],
                           const SizedBox(height: 14),
                           AccentButton(
@@ -722,10 +1090,17 @@ class _DetailDialog extends StatelessWidget {
                             icon: Icons.search,
                             onPressed: () {
                               Navigator.of(context).pop();
-                              // 跳转到搜索页并带入关键词
-                              goToSearch(context, d.originalTitle.isNotEmpty
-                                  ? d.originalTitle
-                                  : d.title);
+                              // B1：**先用展示名（中文）检索**，无结果再由搜索页回退到原名。
+                              // V1.x 直接拿 originalTitle（英文）去搜，中文用户常常 0 结果。
+                              goToSearch(
+                                context,
+                                SearchSeed(
+                                  d.title,
+                                  fallback: d.originalTitle.isEmpty
+                                      ? null
+                                      : d.originalTitle,
+                                ),
+                              );
                             },
                           ),
                           if (d.source == 'abstract')
@@ -733,7 +1108,10 @@ class _DetailDialog extends StatelessWidget {
                               padding: const EdgeInsets.only(top: 8),
                               child: Text(
                                 '（详情来自降级接口 subject_abstract）',
-                                style: TextStyle(color: t.textDim, fontSize: 12),
+                                style: TextStyle(
+                                  color: t.textDim,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                         ],
@@ -755,10 +1133,18 @@ class _DetailDialog extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: RichText(
-        text: TextSpan(children: <TextSpan>[
-          TextSpan(text: '$k：', style: TextStyle(color: t.textDim, fontSize: 14)),
-          TextSpan(text: v, style: TextStyle(color: t.text, fontSize: 14)),
-        ]),
+        text: TextSpan(
+          children: <TextSpan>[
+            TextSpan(
+              text: '$k：',
+              style: TextStyle(color: t.textDim, fontSize: 14),
+            ),
+            TextSpan(
+              text: v,
+              style: TextStyle(color: t.text, fontSize: 14),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -773,16 +1159,25 @@ class _HotEntry {
 }
 
 class _HotBoard extends ConsumerStatefulWidget {
-  const _HotBoard();
+  const _HotBoard({required this.reloadToken});
+
+  /// 父层「刷新」自增此令牌触发重载；保持不变时不会重复请求
+  final int reloadToken;
 
   @override
   ConsumerState<_HotBoard> createState() => _HotBoardState();
 }
 
 class _HotBoardState extends ConsumerState<_HotBoard> {
-  List<_HotEntry> _items = const <_HotEntry>[];
+  static const int _collapsedCount = 8;
+
+  List<_HotEntry> _all = const <_HotEntry>[];
   bool _loading = true;
   String? _error;
+  bool _expanded = false;
+
+  /// 已启用的真实公共磁力源数量（用于空态提示）
+  int _realSourceCount = 0;
 
   @override
   void initState() {
@@ -790,6 +1185,13 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
+  @override
+  void didUpdateWidget(covariant _HotBoard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reloadToken != widget.reloadToken) _load();
+  }
+
+  /// 热搜榜只聚合「已启用的真实磁力源」；演示源一律排除，避免虚假条目上屏。
   Future<void> _load() async {
     final db = ref.read(appDatabaseProvider).maybeValue;
     if (db == null) {
@@ -808,10 +1210,11 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
     try {
       final sources = SourceRepo(db)
           .listAll()
-          .where((s) => s.enabled && s.kind == ResourceKind.magnet)
+          .where((s) => s.enabled && s.kind == ResourceKind.magnet && !s.demo)
           .toList();
       final pool = <_HotEntry>[];
-      // 板块级降级：单源失败仅跳过，不影响整页其余部分
+      final seen = <String>{};
+      // 板块级降级：单源失败仅跳过，不影响其余源与其余板块
       for (final s in sources) {
         try {
           final adapter = adapterFor(s);
@@ -821,7 +1224,10 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
           );
           if (hot == null || hot.isEmpty) continue;
           for (final raw in hot) {
-            pool.add(_HotEntry(normalize(raw, s), s.name));
+            final item = normalize(raw, s);
+            final key = item.dedupeKey.isEmpty ? item.title : item.dedupeKey;
+            if (!seen.add(key)) continue;
+            pool.add(_HotEntry(item, s.name));
           }
         } catch (_) {
           // 忽略单个源失败，继续下一个源
@@ -830,9 +1236,10 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
       pool.sort((a, b) => b.item.hotness.compareTo(a.item.hotness));
       if (!mounted) return;
       setState(() {
-        _items = pool.take(12).toList();
+        _all = pool;
+        _realSourceCount = sources.length;
         _loading = false;
-        _error = _items.isEmpty ? '暂无热搜数据' : null;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -850,14 +1257,23 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Icon(Icons.whatshot, color: t.accent, size: 18),
-              const SizedBox(width: 8),
+              const SizedBox(width: 2),
               Text('热搜榜', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              HubChip(label: '已启用磁力源', selected: true),
+              HubChip(label: '真实磁力源 $_realSourceCount 个', selected: true),
+              if (_all.isNotEmpty)
+                HubChip(label: '共 ${_all.length} 条', selected: _all.isNotEmpty),
             ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '数据来自已启用的公共磁力索引实时榜单（演示源已排除）',
+            style: TextStyle(color: t.textDim, fontSize: 12.5),
           ),
           const SizedBox(height: 14),
           _buildContent(t),
@@ -868,26 +1284,27 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
 
   Widget _buildContent(AppTokens t) {
     if (_loading) {
-      return SizedBox(
-        height: 150,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: 6,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (_, __) => const SizedBox(
-            width: 200,
-            child: SkeletonBox(height: 150, radius: 14),
-          ),
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 4,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 2.6,
         ),
+        itemCount: 8,
+        itemBuilder: (_, _) => const SkeletonBox(height: 88, radius: 14),
       );
     }
     if (_error != null) {
-      // 板块级失败降级：不影响其余板块，提供重试
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('热搜榜加载失败（板块级降级）',
-              style: TextStyle(color: t.danger, fontWeight: FontWeight.w700)),
+          Text(
+            '热搜榜加载失败（板块级降级）',
+            style: TextStyle(color: t.danger, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 6),
           Text('失败原因：$_error', style: TextStyle(color: t.textDim)),
           const SizedBox(height: 12),
@@ -895,66 +1312,209 @@ class _HotBoardState extends ConsumerState<_HotBoard> {
         ],
       );
     }
-    if (_items.isEmpty) {
-      return Text('暂无热搜数据。', style: TextStyle(color: t.textDim));
+    if (_realSourceCount == 0) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: t.bg1,
+          border: Border.all(color: t.border),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '未启用公共磁力源，热搜榜暂无数据。',
+              style: TextStyle(color: t.textHi, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '请在「设置 - 源适配器」启用真实磁力源后重试。',
+              style: TextStyle(color: t.textDim, fontSize: 12.5),
+            ),
+          ],
+        ),
+      );
     }
-    return SizedBox(
-      height: 150,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: _items.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemBuilder: (context, i) {
-          final e = _items[i];
-          return SizedBox(
-            width: 200,
-            child: HubCard(
-              padding: const EdgeInsets.all(14),
-              onTap: () => goToSearch(context, e.item.title),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      e.item.title,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: t.textHi,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: <Widget>[
-                      Icon(Icons.whatshot, color: t.warn, size: 13),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          e.sourceName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: t.textDim, fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+    if (_all.isEmpty) {
+      return Text(
+        '热搜榜暂时取不到数据（源可达但榜单为空），可稍后重试。',
+        style: TextStyle(color: t.textDim),
+      );
+    }
+
+    final shown = _expanded ? _all : _all.take(_collapsedCount).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        LayoutBuilder(
+          builder: (context, c) {
+            final cols = c.maxWidth > 1200 ? 4 : (c.maxWidth > 820 ? 3 : 2);
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 2.6,
+              ),
+              itemCount: shown.length,
+              itemBuilder: (context, i) => _HotTile(
+                rank: i + 1,
+                entry: shown[i],
+                onTap: () =>
+                    goToSearch(context, SearchSeed(shown[i].item.title)),
+              ),
+            );
+          },
+        ),
+        if (_all.length > _collapsedCount) ...<Widget>[
+          const SizedBox(height: 12),
+          Center(
+            child: GhostButton(
+              label: _expanded ? '收起' : '展开全部 ${_all.length} 条',
+              icon: _expanded ? Icons.expand_less : Icons.expand_more,
+              onPressed: () => setState(() => _expanded = !_expanded),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _HotTile extends StatelessWidget {
+  const _HotTile({
+    required this.rank,
+    required this.entry,
+    required this.onTap,
+  });
+  final int rank;
+  final _HotEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final top = rank <= 3;
+    return HubCard(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      onTap: onTap,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: top ? t.accent : t.bg1,
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: top ? t.accent : t.border),
+            ),
+            child: Text(
+              '$rank',
+              style: TextStyle(
+                color: top ? Colors.white : t.textDim,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
               ),
             ),
-          );
-        },
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Text(
+                  entry.item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: t.textHi,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${entry.sourceName} · 热度 ${entry.item.hotness.toStringAsFixed(0)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.textDim, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 统一刷新按钮：只刷新「当前视图」；加载中自转圈并禁用，避免连点打爆接口
+class _RefreshButton extends StatelessWidget {
+  const _RefreshButton({
+    required this.busy,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool busy;
+  final String label;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    return Tooltip(
+      message: '刷新当前视图的数据（不影响另一视图）',
+      child: Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: t.surfaceSolid,
+          border: Border.all(color: busy ? t.accent : t.border),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: busy ? null : () => onTap(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (busy)
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: t.accent,
+                    ),
+                  )
+                else
+                  Icon(Icons.refresh, size: 16, color: t.accent),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: t.textHi,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
 /// 跳转搜索页并注入关键词（通过全局 NavIndex + 搜索页监听）
-final ValueNotifier<String?> searchSeedNotifier = ValueNotifier<String?>(null);
-
-void goToSearch(BuildContext context, String keyword) {
-  searchSeedNotifier.value = keyword;
-  ProviderScope.containerOf(context).read(navIndexProvider.notifier).select(2);
-}
+///
+/// 具体实现见 `features/search/search_seed.dart`（含 B1 的「展示名优先、原名回退」语义）。

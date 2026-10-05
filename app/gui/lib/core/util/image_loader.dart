@@ -16,18 +16,22 @@ class HubImageLoader {
       <String, Future<Uint8List?>>{};
 
   static Dio _dio({String proxy = '', int timeoutMs = 10000}) {
-    final d = Dio(BaseOptions(
-      connectTimeout: Duration(milliseconds: timeoutMs),
-      receiveTimeout: Duration(milliseconds: timeoutMs),
-      responseType: ResponseType.bytes,
-      followRedirects: true,
-    ));
+    final d = Dio(
+      BaseOptions(
+        connectTimeout: Duration(milliseconds: timeoutMs),
+        receiveTimeout: Duration(milliseconds: timeoutMs),
+        responseType: ResponseType.bytes,
+        followRedirects: true,
+      ),
+    );
     if (proxy.isNotEmpty) {
-      d.httpClientAdapter = IOHttpClientAdapter(createHttpClient: () {
-        final c = HttpClient();
-        c.findProxy = (uri) => 'PROXY $proxy';
-        return c;
-      });
+      d.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final c = HttpClient();
+          c.findProxy = (uri) => 'PROXY $proxy';
+          return c;
+        },
+      );
     }
     return d;
   }
@@ -59,8 +63,7 @@ class HubImageLoader {
         url,
         options: Options(
           headers: <String, String>{
-            'user-agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
             if (referer.isNotEmpty) 'referer': referer,
             'accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
@@ -102,7 +105,6 @@ class RefererImage extends StatefulWidget {
 
 class _RefererImageState extends State<RefererImage> {
   Uint8List? _bytes;
-  bool _loaded = false;
 
   @override
   void initState() {
@@ -116,19 +118,20 @@ class _RefererImageState extends State<RefererImage> {
     if (old.url != widget.url || old.proxy != widget.proxy) {
       setState(() {
         _bytes = null;
-        _loaded = false;
       });
       _load();
     }
   }
 
   Future<void> _load() async {
-    final b = await HubImageLoader.load(widget.url,
-        referer: widget.referer, proxy: widget.proxy);
+    final b = await HubImageLoader.load(
+      widget.url,
+      referer: widget.referer,
+      proxy: widget.proxy,
+    );
     if (!mounted) return;
     setState(() {
       _bytes = b;
-      _loaded = true;
     });
   }
 

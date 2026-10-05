@@ -23,11 +23,11 @@ class HubDbException implements Exception {
 
   /// 面向用户的可读文案（UI 只展示这里的内容）
   String get userMessage => switch (code) {
-        HubDbError.openFailed => '无法打开数据文件，请检查是否被占用或磁盘权限不足。',
-        HubDbError.migrationFailed => '数据升级失败，已从备份恢复或请手动处理：$message',
-        HubDbError.newerSchema => '检测到更高版本的数据文件，本程序已切换为只读以免回写损坏数据，请升级到最新版。',
-        HubDbError.writeDisabled => '当前为只读模式（检测到更高版本数据），无法执行写入。',
-      };
+    HubDbError.openFailed => '无法打开数据文件，请检查是否被占用或磁盘权限不足。',
+    HubDbError.migrationFailed => '数据升级或迁移完整性校验失败：$message',
+    HubDbError.newerSchema => '检测到更高版本的数据文件，本程序已切换为只读以免回写损坏数据，请升级到最新版。',
+    HubDbError.writeDisabled => '当前为只读模式（检测到更高版本数据），无法执行写入。',
+  };
 
   @override
   String toString() => 'HubDbException(${code.name}): $message';
@@ -60,7 +60,10 @@ class HubDatabase {
 
   // ---------------------------------------------------------------- 打开/迁移
 
-  static Future<HubDatabase> open({String? path, Map<int, String>? sqlOverride}) async {
+  static Future<HubDatabase> open({
+    String? path,
+    Map<int, String>? sqlOverride,
+  }) async {
     final dbPath = path ?? HubPaths.dbPath;
     HubPaths.ensureDirs();
     final File file = File(dbPath);
@@ -84,9 +87,16 @@ class HubDatabase {
     if (raw.userVersion > kSchemaVersion) {
       // 防止旧程序回写新库
       db.readOnly = true;
-      HubLogger.w('hub.db user_version=${raw.userVersion} > $kSchemaVersion，切换只读');
+      HubLogger.w(
+        'hub.db user_version=${raw.userVersion} > $kSchemaVersion，切换只读',
+      );
     } else {
-      await db.migrate(sqlOverride: sqlOverride);
+      try {
+        await db.migrate(sqlOverride: sqlOverride);
+      } catch (_) {
+        raw.close();
+        rethrow;
+      }
     }
     db.probeCapabilities();
     return db;
@@ -94,12 +104,15 @@ class HubDatabase {
 
   /// 按 user_version 逐条补跑缺失迁移；已跑过的版本绝不重复执行。
   Future<void> migrate({Map<int, String>? sqlOverride}) async {
-    if (readOnly) throw const HubDbException(HubDbError.writeDisabled, 'readOnly');
+    if (readOnly) {
+      throw const HubDbException(HubDbError.writeDisabled, 'readOnly');
+    }
     final current = _db.userVersion;
-    if (current >= kSchemaVersion) return;
-
     final sqls = sqlOverride ?? await loadMigrationSql();
-    verifyMigrationChecksums(sqls);
+    if (sqlOverride == null) {
+      await verifyMigrationChecksums(sqls);
+    }
+    if (current >= kSchemaVersion) return;
 
     for (var v = current + 1; v <= kSchemaVersion; v++) {
       final sql = sqls[v];
@@ -126,24 +139,44 @@ class HubDatabase {
     return out;
   }
 
-  /// 校验迁移文本指纹，防止双端文本漂移（《下步开发计划》R3 的门禁手段）
-  void verifyMigrationChecksums(Map<int, String> sqls) {
+  /// 校验迁移文本指纹，防止双端文本漂移（《下步开发计划》R3 的阻断门禁）。
+  ///
+  /// [manifestText] 仅供纯函数测试注入；生产路径始终读取 assets 中的清单。
+  static Future<void> verifyMigrationChecksums(
+    Map<int, String> sqls, {
+    String? manifestText,
+  }) async {
     try {
-      final raw = rootBundle;
-      raw.loadString('assets/migrations/checksums.json').then((text) {
-        final Map<String, dynamic> expected =
-            jsonDecode(text) as Map<String, dynamic>;
-        for (final entry in expected.entries) {
-          final v = int.tryParse(entry.key.replaceAll(RegExp(r'[^0-9]'), ''));
-          if (v == null || !sqls.containsKey(v)) continue;
-          final actual = sha256.convert(utf8.encode(sqls[v]!)).toString();
-          if (actual != entry.value) {
-            HubLogger.w('迁移 v$v 指纹不匹配（可能与 Electron 版文本漂移）');
-          }
+      final text =
+          manifestText ??
+          await rootBundle.loadString('assets/migrations/checksums.json');
+      final decoded = jsonDecode(text);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('checksums.json 根节点必须是对象');
+      }
+
+      for (final entry in sqls.entries) {
+        final key = 'v${entry.key}';
+        final expected = decoded[key]?.toString().trim() ?? '';
+        if (expected.isEmpty) {
+          throw HubDbException(
+            HubDbError.migrationFailed,
+            '迁移 ${entry.key} 缺少指纹清单',
+          );
         }
-      }).catchError((_) {});
-    } catch (_) {
-      // 指纹文件缺失时不阻断
+        final actual = sha256.convert(utf8.encode(entry.value)).toString();
+        if (actual != expected) {
+          throw HubDbException(
+            HubDbError.migrationFailed,
+            '迁移 ${entry.key} 指纹不匹配，已阻止启动以避免双端结构漂移',
+          );
+        }
+      }
+      HubLogger.i('migration checksums verified (${sqls.length})');
+    } on HubDbException {
+      rethrow;
+    } catch (e) {
+      throw HubDbException(HubDbError.migrationFailed, '无法校验迁移指纹：$e', cause: e);
     }
   }
 
@@ -154,7 +187,9 @@ class HubDatabase {
   bool probeCapabilities() {
     // 基础 FTS5
     try {
-      _db.execute('CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(x)');
+      _db.execute(
+        'CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(x)',
+      );
       _db.execute('DROP TABLE IF EXISTS _fts_probe');
       fts5Available = true;
     } catch (e) {
@@ -165,7 +200,8 @@ class HubDatabase {
     if (fts5Available) {
       try {
         _db.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe2 USING fts5(x, tokenize='trigram')");
+          "CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe2 USING fts5(x, tokenize='trigram')",
+        );
         _db.execute('DROP TABLE IF EXISTS _fts_probe2');
         fts5TrigramAvailable = true;
       } catch (e) {
@@ -173,8 +209,10 @@ class HubDatabase {
         HubLogger.w('FTS5 trigram 不可用（<3 字检索将全部退化为 LIKE）', e);
       }
     }
-    HubLogger.i('sqlite=${sq.sqlite3.version.libVersion} '
-        'fts5=$fts5Available trigram=$fts5TrigramAvailable user_version=$userVersion');
+    HubLogger.i(
+      'sqlite=${sq.sqlite3.version.libVersion} '
+      'fts5=$fts5Available trigram=$fts5TrigramAvailable user_version=$userVersion',
+    );
     return fts5Available && fts5TrigramAvailable;
   }
 
@@ -184,9 +222,12 @@ class HubDatabase {
   /// 因此本方法會先 close 再重开（对齐 Electron 版 restore 前 closeDb 的口径）。
   Future<String> backup({String? target}) async {
     HubPaths.ensureDirs();
-    final to = target ??
-        pj(HubPaths.backupsDir,
-            'hub-${DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}.db');
+    final to =
+        target ??
+        pj(
+          HubPaths.backupsDir,
+          'hub-${DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}.db',
+        );
     close();
     try {
       _rawOpenAndVacuum(path, to);
@@ -222,10 +263,11 @@ class HubDatabase {
     try {
       _db.close();
     } catch (_) {
-    // ignore
+      // ignore
     }
   }
 }
 
 // -------- 轻量工具：避免额外依赖 path_provider 带来的平台分支复杂度
-String pj(String a, String b) => a.endsWith('\\') || a.endsWith('/') ? '$a$b' : '$a\\$b';
+String pj(String a, String b) =>
+    a.endsWith('\\') || a.endsWith('/') ? '$a$b' : '$a\\$b';

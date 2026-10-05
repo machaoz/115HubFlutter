@@ -15,10 +15,12 @@ const double _sizePct = 0.05;
 String _stripWatermark(String s) => s
     .replaceAll(RegExp(r'[\[【(（][^\]】)）]{0,80}@[^\]】)）]{0,120}[\]】)）]'), ' ')
     .replaceAll(
-        RegExp(
-            r'\[(?:www\.)?[a-z0-9][a-z0-9.-]{0,60}\.(?:com|net|org|cc|tv|xyz|top|vip|site)\]',
-            caseSensitive: false),
-        ' ')
+      RegExp(
+        r'\[(?:www\.)?[a-z0-9][a-z0-9.-]{0,60}\.(?:com|net|org|cc|tv|xyz|top|vip|site)\]',
+        caseSensitive: false,
+      ),
+      ' ',
+    )
     .replaceAll(RegExp(r'(?:来自|发布自|压制自)\s*[:：]?\s*\S{1,30}'), ' ')
     .replaceAll(RegExp(r'\s{2,}'), ' ')
     .trim();
@@ -41,7 +43,9 @@ String _toHalfWidth(String s) {
 String cleanTitle(String raw) {
   var v = _toHalfWidth(raw);
   v = _stripWatermark(v);
-  v = v.replaceAll(RegExp(r'[\t\r\n]+'), ' ').replaceAll(RegExp(r'\s{2,}'), ' ');
+  v = v
+      .replaceAll(RegExp(r'[\t\r\n]+'), ' ')
+      .replaceAll(RegExp(r'\s{2,}'), ' ');
   return v.replaceAll(RegExp(r'^[\s\-_·|:：，,。]+|[\s\-_·|:：，,。]+$'), '');
 }
 
@@ -70,8 +74,12 @@ int resWeight(String? res) {
 }
 
 String? parseCodec(String t) {
-  if (RegExp(r'h\.?265|hevc|x265', caseSensitive: false).hasMatch(t)) return 'HEVC';
-  if (RegExp(r'h\.?264|avc|x264', caseSensitive: false).hasMatch(t)) return 'x264';
+  if (RegExp(r'h\.?265|hevc|x265', caseSensitive: false).hasMatch(t)) {
+    return 'HEVC';
+  }
+  if (RegExp(r'h\.?264|avc|x264', caseSensitive: false).hasMatch(t)) {
+    return 'x264';
+  }
   if (RegExp(r'av1', caseSensitive: false).hasMatch(t)) return 'AV1';
   return null;
 }
@@ -97,8 +105,10 @@ const Map<String, int> _unitBytes = <String, int>{
 int? parseSizeBytes(String text, {int? directBytes}) {
   if (directBytes != null && directBytes > 0) return directBytes;
   int? best;
-  for (final m in RegExp(r'(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)', caseSensitive: false)
-      .allMatches(text)) {
+  for (final m in RegExp(
+    r'(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)',
+    caseSensitive: false,
+  ).allMatches(text)) {
     final n = double.tryParse(m.group(1)!);
     final u = _unitBytes[m.group(2)!.toLowerCase()];
     if (n == null || u == null) continue;
@@ -161,13 +171,16 @@ ResourceItem normalize(RawItem raw, SourceLite source) {
     cleanTitle: lower,
     dedupeKey: dedupeKey,
     sourceId: source.id,
-    magnetUri: infohash != null ? (magnetUri ?? 'magnet:?xt=urn:btih:$infohash') : raw.magnet,
+    magnetUri: infohash != null
+        ? (magnetUri ?? 'magnet:?xt=urn:btih:$infohash')
+        : raw.magnet,
     infohash: infohash,
     sha1: raw.sha1?.toLowerCase(),
     secLink: raw.secLink,
     shareCode: raw.shareCode,
     receiveCode: raw.receiveCode,
-    sizeBytes: raw.sizeBytes ??
+    sizeBytes:
+        raw.sizeBytes ??
         parseSizeBytes(raw.sizeText ?? raw.title, directBytes: raw.sizeBytes),
     fileCount: raw.fileCount,
     publishAt: publishAt,
@@ -193,7 +206,8 @@ List<List<ResourceItem>> dedupe(List<ResourceItem> items) {
     for (final g in groups) {
       final m = g.first;
       final strongHit = m.dedupeKey == it.dedupeKey;
-      final weakHit = m.kind == it.kind &&
+      final weakHit =
+          m.kind == it.kind &&
           m.cleanTitle == it.cleanTitle &&
           _sizeClose(m.sizeBytes, it.sizeBytes);
       if (strongHit || weakHit) {
@@ -272,18 +286,26 @@ ResourceItem _representative(List<ResourceItem> g) {
 double scoreGroup(List<ResourceItem> g, Set<String> queryTokens) {
   final m = _representative(g);
   final rel = _relevance(_tokenize(m.cleanTitle), queryTokens);
-  return rel * 100 + m.hotness * 0.12 + _recencyBonus(m.publishAt) * 8 + _qualityBonus(m);
+  return rel * 100 +
+      m.hotness * 0.12 +
+      _recencyBonus(m.publishAt) * 8 +
+      _qualityBonus(m);
 }
 
 /// 排序（稳定：同分 → hotness → 原序 → id 字典序，避免流式刷新跳动）
 List<List<ResourceItem>> rankGroups(
-    List<List<ResourceItem>> groups, Set<String> queryTokens) {
+  List<List<ResourceItem>> groups,
+  Set<String> queryTokens,
+) {
   final indexed = groups.toList().asMap().entries.toList();
-  final scored = indexed.map((e) => (e.key, scoreGroup(e.value, queryTokens), e.value)).toList();
+  final scored = indexed
+      .map((e) => (e.key, scoreGroup(e.value, queryTokens), e.value))
+      .toList();
   scored.sort((a, b) {
     final c = b.$2.compareTo(a.$2);
     if (c != 0) return c;
-    final h = _representative(b.$3).hotness.compareTo(_representative(a.$3).hotness);
+    final h = _representative(b.$3).hotness
+        .compareTo(_representative(a.$3).hotness);
     if (h != 0) return h;
     final i = a.$1.compareTo(b.$1);
     if (i != 0) return i;

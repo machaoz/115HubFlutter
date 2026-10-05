@@ -9,6 +9,9 @@ project(hub_native
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(hub_utils)
 
+# 独立子模块（可脱离本工程单独编译，自带单元测试）
+add_subdirectory(libs/hub_log)
+
 # 模块登记表：新增原生模块在此登记一行，lunch 自动识别
 add_subdirectory(app/baselib)
 add_subdirectory(app/network)

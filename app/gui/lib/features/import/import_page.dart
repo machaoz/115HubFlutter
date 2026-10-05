@@ -1,21 +1,21 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/repos.dart';
+import '../../core/db/settings.dart';
+import '../../core/network/pan115_cloud.dart';
 import '../../state/providers.dart';
 import '../../state/session.dart';
 import '../../core/util/image_loader.dart';
+import '../../core/util/logger.dart';
 import '../../ui/theme.dart';
 import '../../ui/widgets.dart';
-
-/// 导入后端抽象（PoC-2：WebView2 扫码取 Cookie 是最高风险项）
-/// - RealBackend 依赖 desktop_webview_window 取 115 会话 Cookie，**待 PoC-2 验证**
-/// - DemoBackend 保证离线回归可用（与 Electron 版「演示后端」口径一致）
-abstract class ImportBackend {
-  const ImportBackend();
-  String get name;
-  Future<TaskResult> submit(String kind, String target, {void Function(double)? onProgress});
-}
 
 class TaskResult {
   const TaskResult({required this.ok, this.remoteId = '', this.message = ''});
@@ -24,38 +24,84 @@ class TaskResult {
   final String message;
 }
 
-/// 演示后端：确定性成功，用于打通「入队 → 执行 → 看板」全链路
-class DemoBackend extends ImportBackend {
-  const DemoBackend();
+/// 115 离线投递真后端。
+/// 【红线】凭证只从会话状态取用（内存 + 系统加密存储（DPAPI）），绝不落 SQLite / 落文件 / 打印。
+/// 未登录 → 明确报错，**绝不伪造投递成功**。
+class Pan115Backend {
+  const Pan115Backend();
 
-  @override
-  String get name => '演示后端';
+  String get name => '115 离线投递（需登录）';
 
-  @override
-  Future<TaskResult> submit(String kind, String target,
-      {void Function(double)? onProgress}) async {
-    for (var i = 1; i <= 5; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 320));
-      onProgress?.call(i / 5);
+  Future<TaskResult> submit(
+    String kind,
+    String target, {
+    required String cookie,
+    String proxy = '',
+  }) async {
+    if (cookie.isEmpty) {
+      return const TaskResult(ok: false, message: '未登录 115：请先在左侧扫码登录');
     }
-    return const TaskResult(ok: true, remoteId: 'demo-id', message: '演示投递成功');
-  }
-}
-
-/// 真后端占位：PoC-2（WebView2 扫码 + Cookie 仅内存持有）验证通过后启用。
-/// 红线：凭证不落盘、不落库、不打印。
-class RealBackend extends ImportBackend {
-  const RealBackend();
-
-  @override
-  String get name => '115 真后端（待 PoC-2）';
-
-  @override
-  Future<TaskResult> submit(String kind, String target,
-      {void Function(double)? onProgress}) async {
-    throw StateError(
-        'PoC-2（WebView2 内扫码取 Cookie）尚未通过验证，真后端暂未启用。'
-        '可先在「设置 - 源适配器」开启演示源，或使用演示后端打通链路。');
+    if (kind == 'pan115' || target.startsWith('115://')) {
+      return const TaskResult(
+        ok: false,
+        message: '115:// 秒传链接暂不支持离线投递（需网盘侧转存），请改用磁力/HTTP 链接',
+      );
+    }
+    try {
+      final d = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 20),
+          responseType: ResponseType.plain,
+          followRedirects: true,
+        ),
+      );
+      if (proxy.isNotEmpty) {
+        d.httpClientAdapter = IOHttpClientAdapter(
+          createHttpClient: () {
+            final c = HttpClient();
+            c.findProxy = (uri) => 'PROXY $proxy';
+            return c;
+          },
+        );
+      }
+      final res = await d.post<String>(
+        'https://115.com/web/lixian/?ct=lixian&ac=add_task_url',
+        data: <String, String>{'url': target},
+        options: Options(
+          headers: <String, String>{
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'referer': 'https://115.com/',
+            'cookie': cookie,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+        ),
+      );
+      final body = (res.data ?? '').trim();
+      if (body.isEmpty) {
+        return const TaskResult(ok: false, message: '115 返回空响应（可能已掉线，请重新登录）');
+      }
+      final Map<String, dynamic> json =
+          jsonDecode(body) as Map<String, dynamic>;
+      final ok = json['state'] == true || json['state'] == 1;
+      final errno = json['errno']?.toString() ?? '';
+      final msg = (json['error'] ?? json['message'] ?? '').toString();
+      if (!ok) {
+        return TaskResult(
+          ok: false,
+          message: msg.isNotEmpty ? msg : '115 拒绝该任务（errno=$errno）',
+        );
+      }
+      final infoHash = (json['info_hash'] ?? json['infoHash'] ?? '').toString();
+      return TaskResult(
+        ok: true,
+        remoteId: infoHash,
+        message: infoHash.isEmpty ? '已提交到 115 离线任务' : '已提交：$infoHash',
+      );
+    } catch (e) {
+      HubLogger.w('115 离线投递失败', e);
+      return TaskResult(ok: false, message: '投递失败：$e');
+    }
   }
 }
 
@@ -67,89 +113,235 @@ class ImportPage extends ConsumerStatefulWidget {
 }
 
 class _ImportPageState extends ConsumerState<ImportPage> {
-  ImportBackend _backend = const DemoBackend();
+  static const Pan115Backend _backend = Pan115Backend();
+
+  /// 云端进度轮询（仅在有活跃任务且已登录时运行）
+  Timer? _poll;
+  String _cloudNote = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncCloud();
+      _restartPoll();
+    });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// 清空**全部**本地导入记录（含排队 / 进行中）
+  ///
+  /// 必须二次确认，且明确「只清本机记录，不动 115 云端任务」——
+  /// 用户最容易误解的就是这一步会连云端一起删。
+  Future<void> _clearAll() async {
+    final db = ref.read(appDatabaseProvider).maybeValue;
+    if (db == null) return;
+    if (db.readOnly) {
+      showHubToast(context, '数据为只读模式，无法清空导入记录');
+      return;
+    }
+    final repo = ImportRepo(db);
+    final total = repo.count();
+    if (total == 0) {
+      showHubToast(context, '暂无导入记录可清空');
+      return;
+    }
+    final ok =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('清空导入记录？'),
+            content: Text(
+              '将删除本机全部 $total 条导入记录（含排队与进行中）。\n\n'
+              '只清本地记录，不会删除 115 云端已创建的离线任务；'
+              '云端任务仍在你的 115 网盘中继续下载。\n\n'
+              '此操作不可撤销。',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok || !mounted) return;
+    final removed = repo.clearAll();
+    showHubToast(context, '已清空 $removed 条本地导入记录（115 云端任务未受影响）');
+    setState(() {});
+    _restartPoll();
+  }
+
+  /// 有活跃任务 + 已登录 + 开关开启时才起轮询，避免无谓打扰 115 接口
+  void _restartPoll() {
+    _poll?.cancel();
+    final db = ref.read(appDatabaseProvider).maybeValue;
+    if (db == null) return;
+    final cfg = ref.read(appSettingsProvider).pan115;
+    if (!cfg.pollCloudProgress) return;
+    if (!ref.read(sessionProvider).isLoggedIn) return;
+    if (ImportRepo(db).active().isEmpty) return;
+    _poll = Timer.periodic(
+      Duration(seconds: cfg.pollIntervalSeconds),
+      (_) => _syncCloud(),
+    );
+  }
+
+  /// 拉取 115 云端任务列表，回填本地任务的**真实进度**（W3）
+  Future<void> _syncCloud() async {
+    final db = ref.read(appDatabaseProvider).maybeValue;
+    if (db == null) return;
+    final session = ref.read(sessionProvider);
+    if (!session.isLoggedIn) {
+      if (mounted) setState(() => _cloudNote = '未登录 115：显示的是本地队列状态');
+      return;
+    }
+    final settings = ref.read(appSettingsProvider);
+    final note = await syncCloudToRepo(
+      ImportRepo(db),
+      cookie: session.cookie,
+      proxy: settings.network.proxy,
+      timeoutMs: settings.network.timeoutMs,
+    );
+    if (!mounted) return;
+    setState(() => _cloudNote = note);
+    // 没有活跃任务了就停轮询，别空转
+    _restartPoll();
+  }
 
   Future<void> _runPending() async {
     final db = ref.read(appDatabaseProvider).maybeValue;
     if (db == null) return;
+    final session = ref.read(sessionProvider);
+    if (!session.isLoggedIn) {
+      showHubToast(context, '未登录 115，请先扫码登录后再执行');
+      return;
+    }
+    final cookie = session.cookie;
+    final proxy = ref.read(appSettingsProvider).network.proxy;
     final repo = ImportRepo(db);
     final rows = repo.list().where((r) => r['status'] == 'pending').toList();
+    if (rows.isEmpty) {
+      showHubToast(context, '没有待处理任务');
+      return;
+    }
     for (final r in rows) {
       final id = (r['id'] as num).round();
-      repo.updateStatus(id, 'running', progress: 0);
-      setState(() {});
-      try {
-        final res = await _backend.submit(
-          r['kind'].toString(),
-          r['target'].toString(),
-          onProgress: (p) {
-            repo.updateStatus(id, 'running', progress: (p * 100).round());
-            if (mounted) setState(() {});
-          },
-        );
-        repo.updateStatus(id, 'success', message: res.message, progress: 100);
-      } catch (e) {
-        repo.updateStatus(id, 'failed', message: '$e');
+      repo.updateStatus(id, 'running', progress: 0, message: '正在投递到 115…');
+      if (mounted) setState(() {});
+
+      final res = await _backend.submit(
+        r['kind'].toString(),
+        r['target'].toString(),
+        cookie: cookie,
+        proxy: proxy,
+      );
+      if (res.ok) {
+        // 投递成功 ≠ 下载完成：进度交给云端列表回填，不再写死 100%
+        repo.markSubmitted(id, remoteId: res.remoteId, message: res.message);
+      } else {
+        repo.updateStatus(id, 'failed', message: res.message);
       }
       if (mounted) setState(() {});
     }
+    await _syncCloud();
+    if (mounted) showHubToast(context, '投递完成，云端进度已同步');
   }
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
     final db = ref.watch(appDatabaseProvider).maybeValue;
-    final rows = db == null ? const <Map<String, Object?>>[] : ImportRepo(db).list();
+    final rows = db == null
+        ? const <Map<String, Object?>>[]
+        : ImportRepo(db).list();
+    final loggedIn = ref.watch(sessionProvider).isLoggedIn;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(30, 26, 30, 40),
       children: <Widget>[
         Text('115 导入', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 4),
-        Text('内嵌 WebView2 扫码登录 → 批量投递离线任务 → 任务看板（凭证不落盘）',
-            style: TextStyle(color: t.textDim)),
+        Text(
+          '官方二维码扫码登录 → 磁力链接离线投递 115 → 任务看板（进度取自 115 云端任务列表）',
+          style: TextStyle(color: t.textDim),
+        ),
         const SizedBox(height: 18),
-        LayoutBuilder(builder: (context, c) {
-          final wide = c.maxWidth > 860;
-          const login = _LoginCard();
-          final board = _TaskBoard(rows: rows);
-          if (!wide) {
-            return Column(children: <Widget>[login, const SizedBox(height: 16), board]);
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              SizedBox(width: 300, child: login),
-              const SizedBox(width: 16),
-              Expanded(child: board),
-            ],
-          );
-        }),
+        LayoutBuilder(
+          builder: (context, c) {
+            final wide = c.maxWidth > 860;
+            const login = _LoginCard();
+            final board = _TaskBoard(
+              rows: rows,
+              cloudNote: _cloudNote,
+              loggedIn: loggedIn,
+              onRefresh: _syncCloud,
+            );
+            if (!wide) {
+              return Column(
+                children: <Widget>[login, const SizedBox(height: 16), board],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(width: 300, child: login),
+                const SizedBox(width: 16),
+                Expanded(child: board),
+              ],
+            );
+          },
+        ),
         const SizedBox(height: 16),
         Wrap(
           spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            HubSegmented<ImportBackend>(
-              label: '后端',
-              items: const <(ImportBackend, String)>[
-                (DemoBackend(), '演示后端'),
-                (RealBackend(), '真后端'),
-              ],
-              value: _backend is DemoBackend ? const DemoBackend() : const RealBackend(),
-              onChanged: (v) => setState(() => _backend = v),
+            HubChip(
+              label: _backend.name,
+              selected: true,
+              icon: loggedIn ? Icons.check_circle : Icons.lock_outline,
+              color: loggedIn ? t.ok : t.warn,
             ),
             AccentButton(
-                label: '执行待处理任务', icon: Icons.play_arrow, onPressed: _runPending),
+              label: '执行待处理任务',
+              icon: Icons.play_arrow,
+              onPressed: loggedIn ? _runPending : null,
+            ),
             GhostButton(
               label: '清空已完成',
               icon: Icons.cleaning_services_outlined,
               onPressed: () {
-                ImportRepo(ref.read(appDatabaseProvider).value!).clearFinished();
+                ImportRepo(ref.read(appDatabaseProvider).value!)
+                    .clearFinished();
                 setState(() {});
               },
             ),
+            GhostButton(
+              label: '清空导入记录',
+              icon: Icons.delete_sweep_outlined,
+              onPressed: _clearAll,
+            ),
           ],
         ),
+        if (!loggedIn) ...<Widget>[
+          const SizedBox(height: 10),
+          Text(
+            '执行任务前需先完成 115 扫码登录（凭证存于系统加密存储（DPAPI），下次启动自动恢复）。',
+            style: TextStyle(color: t.textDim, fontSize: 12.5),
+          ),
+        ],
       ],
     );
   }
@@ -163,8 +355,10 @@ class _LoginCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.t;
     final s = ref.watch(sessionProvider);
-    final proxy = ref.watch(appSettingsProvider).network.proxy;
-    final busy = s.phase == SessionPhase.fetchingQr;
+    final settings = ref.watch(appSettingsProvider);
+    final proxy = settings.network.proxy;
+    final app = pan115AppOf(settings.pan115.loginApp);
+    final showQr = s.qrUrl.isNotEmpty && !s.isLoggedIn;
     final color = switch (s.phase) {
       SessionPhase.loggedIn => t.ok,
       SessionPhase.failed || SessionPhase.expired => t.danger,
@@ -176,16 +370,21 @@ class _LoginCard extends ConsumerWidget {
       glow: true,
       child: Column(
         children: <Widget>[
-          Text('扫码登录',
-              style:
-                  TextStyle(color: t.textHi, fontSize: 17, fontWeight: FontWeight.w700)),
+          Text(
+            '扫码登录',
+            style: TextStyle(
+              color: t.textHi,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: 14),
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: SizedBox(
               width: 180,
               height: 180,
-              child: s.qrUrl.isEmpty
+              child: !showQr
                   ? Container(
                       decoration: BoxDecoration(
                         color: t.bg0,
@@ -194,48 +393,119 @@ class _LoginCard extends ConsumerWidget {
                       alignment: Alignment.center,
                       child: Icon(Icons.qr_code_2, size: 54, color: t.textDim),
                     )
-                  : RefererImage(
-                      url: s.qrUrl,
-                      referer: 'https://115.com/',
-                      proxy: proxy,
-                      placeholder: Container(
-                        alignment: Alignment.center,
-                        child: const SizedBox(
-                            width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        RefererImage(
+                          url: s.qrUrl,
+                          referer: 'https://115.com/',
+                          proxy: proxy,
+                          placeholder: Container(
+                            alignment: Alignment.center,
+                            child: const SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        ),
+                        if (s.phase == SessionPhase.expired ||
+                            s.phase == SessionPhase.failed)
+                          Container(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            alignment: Alignment.center,
+                            child: const Text(
+                              '已失效\n请重新获取',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
             ),
           ),
           const SizedBox(height: 14),
           HubChip(label: s.phase.label, selected: s.isLoggedIn, color: color),
+          if (s.phase == SessionPhase.waitingScan ||
+              s.phase == SessionPhase.scanned) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              '二维码 ${s.waitSeconds}s 后失效',
+              style: TextStyle(
+                color: s.waitSeconds <= 20 ? t.danger : t.textDim,
+                fontSize: 12,
+              ),
+            ),
+          ],
           if (s.message.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(s.message,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: t.textDim, fontSize: 12.5)),
-          ],
-          if (s.phase == SessionPhase.waitingScan || s.phase == SessionPhase.scanned) ...<Widget>[
-            const SizedBox(height: 6),
-            Text('二维码 ${s.waitSeconds}s 后失效',
-                style: TextStyle(color: t.textDim, fontSize: 12)),
-          ],
-          const SizedBox(height: 12),
-          Text('凭证仅内存持有，不落盘 / 不落库 / 不打印',
+            const SizedBox(height: 8),
+            Text(
+              s.message,
               textAlign: TextAlign.center,
-              style: TextStyle(color: t.textDim, fontSize: 12)),
+              style: TextStyle(color: t.textDim, fontSize: 12.5),
+            ),
+          ],
+          const SizedBox(height: 10),
+          // 【W1】明确告知本次登录占用哪个设备槽位，让用户知道为什么不会顶掉网页端
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            alignment: WrapAlignment.center,
+            children: <Widget>[
+              HubChip(
+                label: '绑定设备：${app.label.split('（').first}',
+                icon: Icons.devices_other,
+                selected: true,
+                color: app.conflicts ? t.warn : t.ok,
+              ),
+            ],
+          ),
+          if (app.conflicts) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              '该设备槽位会挤掉你正在使用的那一端，建议在「设置 - 115 会话」改用小程序/电视端。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.warn, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 8),
+          // 【凭证存储口径】必须如实：Windows 版凭证会落到系统加密存储
+          // （DPAPI 密文，密钥由操作系统按当前用户托管），
+          // 但绝不写 SQLite、明文文件或日志。旧文案「仅内存持有」已过时。
+          Text(
+            s.credentialRestored
+                ? '凭证已从系统加密存储恢复（DPAPI），不写数据库 / 不写日志'
+                : (s.credentialPersisted
+                      ? '凭证已存入系统加密存储（DPAPI），不写数据库 / 不写日志'
+                      : '凭证未持久化：本次登录有效，下次启动需重新扫码'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: s.credentialRestored ? t.ok : t.textDim,
+              fontSize: 12,
+            ),
+          ),
           const SizedBox(height: 12),
           AccentButton(
-            label: busy
+            label: s.phase == SessionPhase.fetchingQr
                 ? '获取中…'
-                : (s.phase == SessionPhase.expired || s.phase == SessionPhase.failed
-                    ? '重新获取二维码'
-                    : (s.isLoggedIn ? '重新登录' : '发起扫码登录')),
+                : (s.phase == SessionPhase.expired ||
+                          s.phase == SessionPhase.failed
+                      ? '重新获取二维码'
+                      : (s.isLoggedIn ? '重新登录' : '发起扫码登录')),
             icon: Icons.qr_code_scanner,
             expand: true,
-            onPressed: busy
+            onPressed: s.phase == SessionPhase.fetchingQr
                 ? null
                 : () {
-                    ref.read(sessionProvider.notifier).configure(proxy: proxy);
+                    ref
+                        .read(sessionProvider.notifier)
+                        .configure(
+                          proxy: proxy,
+                          loginApp: settings.pan115.loginApp,
+                        );
                     ref.read(sessionProvider.notifier).start();
                   },
           ),
@@ -254,8 +524,16 @@ class _LoginCard extends ConsumerWidget {
 }
 
 class _TaskBoard extends StatelessWidget {
-  const _TaskBoard({required this.rows});
+  const _TaskBoard({
+    required this.rows,
+    required this.cloudNote,
+    required this.loggedIn,
+    required this.onRefresh,
+  });
   final List<Map<String, Object?>> rows;
+  final String cloudNote;
+  final bool loggedIn;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -264,8 +542,35 @@ class _TaskBoard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('投递队列看板',
-              style: TextStyle(color: t.textHi, fontSize: 17, fontWeight: FontWeight.w700)),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  '投递队列看板',
+                  style: TextStyle(
+                    color: t.textHi,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              GhostButton(
+                label: '同步云端进度',
+                icon: Icons.sync,
+                onPressed: () => onRefresh(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            cloudNote.isEmpty
+                ? (loggedIn ? '正在读取 115 云端任务进度…' : '未登录 115：仅显示本地队列状态')
+                : cloudNote,
+            style: TextStyle(
+              color: loggedIn ? t.textDim : t.warn,
+              fontSize: 12.5,
+            ),
+          ),
           const SizedBox(height: 14),
           if (rows.isEmpty)
             Padding(
@@ -323,13 +628,19 @@ class _TaskRow extends StatelessWidget {
                       : row['target'].toString(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: t.textHi, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: t.textHi,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              Text(status, style: TextStyle(color: color, fontSize: 12.5)),
+              Text(
+                status == 'running' ? '$progress%' : status,
+                style: TextStyle(color: color, fontSize: 12.5),
+              ),
             ],
           ),
-          if (status == 'running') ...<Widget>[
+          if (status == 'running' || progress > 0) ...<Widget>[
             const SizedBox(height: 8),
             ClipRRect(
               borderRadius: BorderRadius.circular(99),
@@ -341,12 +652,15 @@ class _TaskRow extends StatelessWidget {
               ),
             ),
           ],
-          if (row['message'] != null && row['message'].toString().isNotEmpty) ...<Widget>[
+          if (row['message'] != null &&
+              row['message'].toString().isNotEmpty) ...<Widget>[
             const SizedBox(height: 6),
-            Text(row['message'].toString(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: t.textDim, fontSize: 12.5)),
+            Text(
+              row['message'].toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: t.textDim, fontSize: 12.5),
+            ),
           ],
         ],
       ),

@@ -9,6 +9,45 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart' as sq;
 
+/// 顶层入口包一层 try：动态库加载失败会以 exit=255 + 一段看不懂的堆栈收场，
+/// 而「sqlite3 原生库缺失」是**环境问题**而不是断言失败，必须把两者区分开。
+///
+/// 【实测踩到的坑】2026-10-07 首次真跑 CI 时，本护栏是 15 个里唯一红的那个
+/// （exit=255）。根因：本文件 import 了 package:sqlite3，而它的原生库只存在于
+/// `.dart_tool/lib/sqlite3.dll` —— 那是 native assets 构建钩子的产物，
+/// `.dart_tool/` 被 gitignore，`flutter pub get` 不会产出它。
+/// 换句话说，本护栏**并非纯 Dart**，它隐式绑了一个未声明的原生依赖。
+/// CI 已改为把它排在 `flutter test` 之后（那一步一定会构建 native assets），
+/// 这里再补一条人类可读的诊断，让「环境没准备好」和「断言挂了」一眼可分。
+void guardedMain() {
+  try {
+    _runChecks();
+  } on Object catch (e) {
+    final String msg = e.toString();
+    final bool missingNative =
+        msg.contains('sqlite3.dll') ||
+        msg.contains('DynamicLibrary') ||
+        msg.contains('Failed to load') ||
+        msg.contains('找不到指定的模块');
+    if (missingNative) {
+      stderr.writeln('');
+      stderr.writeln('环境未就绪（不是断言失败）：sqlite3 原生库不可用。');
+      stderr.writeln('  期望位置：.dart_tool/lib/sqlite3.dll');
+      stderr.writeln('  原因：它是 native assets 构建钩子的产物，gitignore 掉了，');
+      stderr.writeln(
+        '        `flutter pub get` 不会产出 —— 必须先跑 flutter test / build。',
+      );
+      stderr.writeln('  CI 已把本护栏排在 flutter test 之后；若在本地复现，跑一次');
+      stderr.writeln('        ./lunch gui   即可重新生成该 DLL。');
+      exit(2);
+    }
+    stderr.writeln('');
+    stderr.writeln('护栏异常终止（未归类的异常）：$msg');
+    stderr.writeln(e);
+    exit(255);
+  }
+}
+
 int _pass = 0;
 int _fail = 0;
 
@@ -62,7 +101,7 @@ sq.Database openWithRecovery(String dbPath, {String? quarantineTo}) {
 int countRows(sq.Database db, String table) =>
     db.select('SELECT count(*) c FROM $table').first['c'] as int;
 
-void main() {
+void _runChecks() {
   final tmp = Directory.systemTemp.createTempSync('hub_crash_guard_');
   stdout.writeln('临时目录: ${tmp.path}');
 
@@ -207,3 +246,5 @@ void main() {
   stdout.writeln('通过 $_pass / 失败 $_fail');
   if (_fail > 0) exit(1);
 }
+
+main() => guardedMain();

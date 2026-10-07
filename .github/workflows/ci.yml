@@ -8,7 +8,7 @@ on:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -36,22 +36,57 @@ jobs:
         working-directory: app/gui
         run: flutter analyze
 
+      - name: Build native library (hub_native.dll)
+        # 用 Visual Studio 生成器：windows-latest 预装 VS，无需 cl.exe 在 PATH；
+        # 多配置生成器的产物落在 <build>/<Config>/ 下，故用递归查找定位 dll。
+        run: |
+          cmake -S . -B .cache/ci -G "Visual Studio 17 2022" -A x64
+          cmake --build .cache/ci --config Debug --target hub_native
+          $dll = Get-ChildItem -Path .cache/ci -Recurse -Filter hub_native.dll | Select-Object -First 1
+          if (-not $dll) { throw 'hub_native.dll not found after build' }
+          Copy-Item $dll.FullName app/gui/hub_native.dll -Force
+
+      # ---------------------------------------------------------------------
+      # 步骤顺序是**刻意**的，改动前先读下面这段。
+      #
+      # 护栏必须排在 `flutter test` 之后：2026-10-07 实测踩到的坑 ——
+      # `tool/db_crash_guard.dart` 名义上是「纯 Dart 护栏」，但它 import 了
+      # package:sqlite3，而 sqlite3 的原生库只存在于
+      # `app/gui/.dart_tool/lib/sqlite3.dll` —— 那是 native assets 构建钩子的
+      # 产物，`.dart_tool/` 被 gitignore，而 `flutter pub get` **不会**产出它。
+      # 于是第一次真跑 CI 时：前 14 个护栏全绿、唯独它 exit=255（未捕获的
+      # 动态库加载异常）。本机之所以能跑，纯粹是因为历史上跑过 flutter 构建、
+      # 产物还留在工作区。
+      #
+      # 这是「看起来独立、实际绑了未声明的原生依赖」，与当年「6 个护栏从未被
+      # 任何环节调用」是同一类门禁缺陷，只是方向相反：那次是静默不跑，
+      # 这次是静默依赖。本步骤因此保留 preflight，让依赖显式化而不是靠运气。
+      #
+      # 排到 flutter test 之后还有个附带好处：`media_scan_check` 会走真实的
+      # native FFI 分支（与本地 `lunch quality` 一致），而不是只在 CI 上验
+      # 那条几乎没人跑过的 Dart 回退分支。
+      #
+      # 注意：护栏一律用 `dart <file>` 而非 `dart run <file>` —— dartdev 会触发
+      # sqlite3 的 native assets 构建并在本项目受限环境下挂死；直接指定文件可绕开。
       - name: Run pure Dart regression guards
         working-directory: app/gui
-        # 清单唯一数据源：新增护栏只需改 app/gui/.tools/guards.txt，
-        # 不必同时改本文件与 lunch（两处手写副本曾导致 6 个护栏永久不被调用）。
-        #
-        # 统一用 `dart <file>` 而非 `dart run <file>`：dartdev 会触发 sqlite3 的
-        # native assets 构建并挂死；直接指定文件可绕开。
-        #
-        # 注意：本步骤刻意排在原生构建**之前** —— 这些护栏的设计前提就是「不依赖
-        # hub_native.dll」（这样本地 ./lunch quality 也能免编译跑）。
-        # media_scan_check 因此只会验 Dart 回退分支；其 native FFI 分支由下一步
-        # 构建产物就位后的 flutter test（native 标签）覆盖。
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not (Test-Path .tools/guards.txt)) { throw '护栏清单缺失：app/gui/.tools/guards.txt' }
+
+          # ---- preflight：把「护栏隐式依赖原生库」这件事显式化 ----
+          # db_crash_guard 需要 sqlite3 原生库。若它缺失，脚本会以 exit=255
+          # 抛出一个未捕获的动态库异常，日志里只有一行看不懂的堆栈。
+          # 这里提前检查并给出可行动的提示，避免「护栏红了不知道为什么」。
+          $sqliteDll = '.dart_tool/lib/sqlite3.dll'
+          if (-not (Test-Path $sqliteDll)) {
+            throw "缺少 sqlite3 原生库（$sqliteDll）。db_crash_guard 依赖它；`flutter pub get` 不会产出，必须先跑 flutter test / flutter build。"
+          }
+
+          # 护栏清单唯一数据源：新增护栏只需改 app/gui/.tools/guards.txt，
+          # 不必同时改本文件与 lunch（两处手写副本曾导致 6 个护栏永久不被调用）。
+          #
           # -Encoding UTF8 必须显式写：Windows PowerShell 5.1 的 Get-Content 默认按
           # ANSI 解码无 BOM 的 UTF-8 文件，中文注释会被错解导致行边界错位（实测 50 行
           # 读成 37 行），末尾注释被粘到 db_crash_guard 行前，该护栏因此被当成注释
@@ -60,7 +95,10 @@ jobs:
           $expected = @($lines | Where-Object {
             $t = $_.Trim(); $t -and -not $t.StartsWith('#')
           }).Count
+          if ($expected -eq 0) { throw '护栏清单里没有任何有效条目（全部被当成注释了？）' }
+
           $ran = 0
+          $failed = @()
           foreach ($raw in $lines) {
             $g = $raw.Trim()
             if (-not $g -or $g.StartsWith('#')) { continue }
@@ -75,28 +113,30 @@ jobs:
             Write-Host "::group::guard $g"
             try {
               & dart $g
-              if ($LASTEXITCODE -ne 0) { throw "护栏失败（exit=$LASTEXITCODE）：$g" }
-              $ran++
+              $code = $LASTEXITCODE
+              # media_scan_check 会在临时目录建样本树，Windows Defender 会去扫新文件，
+              # 偶发文件占用导致首跑失败（复跑即过，与功能代码无关）。
+              # 这里只对它重试一次，并且**必须显式打印**重试事实 ——
+              # 静默重试会掩盖真实缺陷，正是本项目吃过亏的地方。
+              if ($code -ne 0 -and $g -eq '.tools/media_scan_check.dart') {
+                Write-Warning "护栏 $g 首跑失败（exit=$code），疑似 Defender 占用临时文件，重试一次"
+                Start-Sleep -Seconds 3
+                & dart $g
+                $code = $LASTEXITCODE
+              }
+              if ($code -ne 0) { $failed += "$g(exit=$code)" }
+              else { $ran++ }
             } finally {
               Write-Host '::endgroup::'
             }
           }
+
           # 自维护不变量：实际跑过的个数必须等于清单里的有效行数。
           # 差额非零 = 有护栏被静默跳过（这正是本步骤反复踩的坑），直接判失败。
           if ($ran -ne $expected) {
-            throw "护栏执行数不符：清单 $expected 行，实跑 $ran 个"
+            throw "护栏执行数不符：清单 $expected 行，实跑 $ran 个；失败清单：$($failed -join ', ')"
           }
           Write-Host "护栏执行完毕：$ran / $expected 个"
-
-      - name: Build native library (hub_native.dll)
-        # 用 Visual Studio 生成器：windows-latest 预装 VS，无需 cl.exe 在 PATH；
-        # 多配置生成器的产物落在 <build>/<Config>/ 下，故用递归查找定位 dll。
-        run: |
-          cmake -S . -B .cache/ci -G "Visual Studio 17 2022" -A x64
-          cmake --build .cache/ci --config Debug --target hub_native
-          $dll = Get-ChildItem -Path .cache/ci -Recurse -Filter hub_native.dll | Select-Object -First 1
-          if (-not $dll) { throw 'hub_native.dll not found after build' }
-          Copy-Item $dll.FullName app/gui/hub_native.dll -Force
 
       - name: Run Flutter tests (includes native-tagged FFI/DPAPI tests)
         working-directory: app/gui

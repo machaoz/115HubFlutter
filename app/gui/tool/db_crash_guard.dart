@@ -247,4 +247,7 @@ void _runChecks() {
   if (_fail > 0) exit(1);
 }
 
-main() => guardedMain();
+/// 顶层入口。返回类型显式写 `void`：`flutter analyze` 的
+/// `strict_top_level_inference` 会因箭头函数的返回值推断不出而报 info，
+/// 而 CI 的 `flutter analyze` 是**零容忍**的（任何 info 都让步骤失败）。
+void main() => guardedMain();

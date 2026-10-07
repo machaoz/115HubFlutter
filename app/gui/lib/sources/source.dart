@@ -267,6 +267,92 @@ class SourceRepo {
       id,
     ]);
   }
+
+  /// 删除自定义源（P0-6：UI 不得自己拼 DELETE）
+  ///
+  /// 只允许删 `custom-` 前缀，内置源（迁移表产物）不受影响。
+  void deleteCustom(String id) {
+    if (_db.readOnly) return;
+    if (!id.startsWith('custom-')) return;
+    _db.handle.execute('DELETE FROM source_site WHERE id=?', <Object?>[id]);
+  }
+
+  /// 清理演示源，返回被清理条数（P0-6）
+  ///
+  /// count + delete 收在同一事务内（合掉架构评审登记的 TR5：读-改-写无事务）。
+  int purgeDemo() {
+    if (_db.readOnly) return 0;
+    _db.handle.execute('BEGIN IMMEDIATE');
+    try {
+      final n = _db.handle.select(
+        "SELECT COUNT(*) AS c FROM source_site WHERE config_json LIKE '%\"demo\":true%'",
+      );
+      final count = (n.first['c'] as num?)?.round() ?? 0;
+      if (count > 0) {
+        _db.handle.execute(
+          "DELETE FROM source_site WHERE config_json LIKE '%\"demo\":true%'",
+        );
+      }
+      _db.handle.execute('COMMIT');
+      return count;
+    } catch (_) {
+      _db.handle.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  /// 新增自定义源，返回生成的 id（P0-6：UI 不得自己拼 INSERT）
+  String insertCustom({
+    required String name,
+    required ResourceKind kind,
+    required String addr,
+  }) {
+    final id = 'custom-${DateTime.now().millisecondsSinceEpoch}';
+    final cfg = kind == ResourceKind.magnet
+        ? <String, dynamic>{'custom': true, 'baseUrl': addr}
+        : <String, dynamic>{'custom': true, 'shareUrl': addr};
+    _db.handle.execute(
+      'INSERT INTO source_site(id,name,kind,enabled,priority,rate_limit_rps,timeout_ms,health,config_json) '
+      'VALUES(?,?,?,?,?,?,?,?,?)',
+      <Object?>[
+        id,
+        name,
+        kind.name,
+        1,
+        50,
+        1,
+        8000,
+        jsonEncode(<String, dynamic>{'ok': true}),
+        jsonEncode(cfg),
+      ],
+    );
+    return id;
+  }
+
+  /// 写入协议识别结果（P0-6）
+  ///
+  /// 由仓储层自己读旧 config 再合并写回 —— UI 不再需要先 `listAll()` 拿 config
+  /// 再传回来，JSON 编解码的职责回到数据层。
+  void setProtocol(String id, {required String protocol, String apiBase = ''}) {
+    if (_db.readOnly) return;
+    final rows = _db.handle.select(
+      'SELECT config_json FROM source_site WHERE id=?',
+      <Object?>[id],
+    );
+    if (rows.isEmpty) return;
+    Map<String, dynamic> cfg = <String, dynamic>{};
+    try {
+      cfg = jsonDecode(
+        rows.first['config_json']?.toString() ?? '{}',
+      ) as Map<String, dynamic>;
+    } catch (_) {}
+    cfg['protocol'] = protocol;
+    cfg['apiBase'] = apiBase;
+    _db.handle.execute(
+      'UPDATE source_site SET config_json=? WHERE id=?',
+      <Object?>[jsonEncode(cfg), id],
+    );
+  }
 }
 
 /// 稳定哈希（演示源确定性数据用）

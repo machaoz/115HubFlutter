@@ -3,6 +3,23 @@
 debug/
 release/
 libs/hub_log/build/
+# 注意：gitignore 的 # 只有写在行首才是注释，行尾注释会被当成文件名的一部分！
+# 顶层 CMake/VS 生成器产物（ALL_BUILD.vcxproj / CMakeCache.txt 等）
+/build/
+
+# 临时与备份（不入库）
+# 例：windows/runner/resources/app_icon.ico.bak（Flutter 默认图标备份）
+*.bak
+app/gui/_analysis_result.txt
+app/gui/.tools/_tmp_*
+
+# 第三方素材原始压缩包（已子集化进 assets/icons，无需入库）
+/res/image/
+
+# vendored file_scan 里自带的构建产物与 IDE/AI 工具元数据（非源码，不入库）
+app/third_party/file_scan/file_scan/build/
+app/third_party/file_scan/build/
+.codeartsdoer/
 
 # ---- Flutter / Dart ----
 app/gui/.dart_tool/
@@ -23,3 +40,8 @@ app/gui/macos/Flutter/ephemeral/
 # ---- 系统 ----
 Thumbs.db
 .DS_Store
+
+# ---- 临时与备份（不入库）----
+
+# ---- 第三方素材原始压缩包（已子集化进 assets/icons，无需入库）----
+/res/image/

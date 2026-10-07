@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/repos.dart';
-import '../../core/network/pan115_cloud.dart';
+import '../../core/navigation/app_route.dart';
+import '../../state/cloud_sync_controller.dart';
 import '../../state/providers.dart';
 import '../../state/session.dart';
 import '../../sources/source.dart';
@@ -21,105 +22,23 @@ class OverviewPage extends ConsumerStatefulWidget {
   ConsumerState<OverviewPage> createState() => _OverviewPageState();
 }
 
+/// 云端轮询 Timer 已收敛到 `CloudSyncController`：
+/// 本页只 `ref.watch` 消费状态，不再自己起定时器、也不持有任务快照副本，
+/// 「打开设置才轮询 / 登出就停」这类判断全部由 controller 内部负责。
 class _OverviewPageState extends ConsumerState<OverviewPage> {
-  Timer? _timer;
-
-  /// 本地任务快照（含真实进度回填后的结果）
-  List<Map<String, Object?>> _rows = const <Map<String, Object?>>[];
-  Map<String, int> _stats = const <String, int>{
-    'pending': 0,
-    'running': 0,
-    'success': 0,
-    'failed': 0,
-  };
-
-  /// 云端同步的最近一次结论（成功条数 / 失败原因），用于在看板头部如实告知
-  String _cloudNote = '';
-  bool _cloudBusy = false;
-
   /// 看板「隐藏详情」开关：只作用于本页面会话，切走再回来恢复默认展开。
   /// 隐藏时保留四项统计与同步状态，只收起任务实例行与条数提示。
   bool _hideTaskDetails = false;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pull();
-      _restartTimer();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  /// 轮询节奏跟随「设置 - 115 会话」；关掉开关即停止，不打扰 115 接口
-  void _restartTimer() {
-    _timer?.cancel();
-    final cfg = ref.read(appSettingsProvider).pan115;
-    if (!cfg.pollCloudProgress) return;
-    _timer = Timer.periodic(
-      Duration(seconds: cfg.pollIntervalSeconds),
-      (_) => _pull(),
-    );
-  }
-
-  /// 读本地任务 + 拉一次 115 云端任务列表，把**真实进度**回填到看板（W3）
-  Future<void> _pull() async {
-    final db = ref.read(appDatabaseProvider).maybeValue;
-    if (db == null || !mounted) return;
-    final repo = ImportRepo(db);
-
-    final settings = ref.read(appSettingsProvider);
-    final cfg = settings.pan115;
-    final session = ref.read(sessionProvider);
-
-    if (cfg.pollCloudProgress && session.isLoggedIn && !_cloudBusy) {
-      _cloudBusy = true;
-      try {
-        final note = await syncCloudToRepo(
-          repo,
-          cookie: session.cookie,
-          proxy: settings.network.proxy,
-          timeoutMs: settings.network.timeoutMs,
-        );
-        if (mounted) _cloudNote = note;
-      } finally {
-        _cloudBusy = false;
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _rows = repo.list();
-      _stats = repo.stats();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final t = context.t;
-    ref.listen(appSettingsProvider, (prev, next) {
-      if (prev?.pan115.pollCloudProgress != next.pan115.pollCloudProgress ||
-          prev?.pan115.pollIntervalSeconds != next.pan115.pollIntervalSeconds) {
-        _restartTimer();
-      }
-    });
-
+    final cloud = ref.watch(cloudSyncControllerProvider);
     final db = ref.watch(appDatabaseProvider).maybeValue;
     final session = ref.watch(sessionProvider);
 
     final favCount = db == null ? 0 : FavoritesRepo(db).count();
-    final stats = db == null
-        ? const <String, int>{
-            'pending': 0,
-            'running': 0,
-            'success': 0,
-            'failed': 0,
-          }
-        : _stats;
+    final stats = cloud.stats;
     final sources = db == null ? <SourceLite>[] : SourceRepo(db).listAll();
     final healthy = sources.where((s) => s.enabled).length;
     final hour = DateTime.now().hour;
@@ -229,15 +148,17 @@ class _OverviewPageState extends ConsumerState<OverviewPage> {
             final wide = c.maxWidth > 980;
             final speed = _SpeedCard();
             final board = _QueueBoard(
-              rows: _rows,
+              rows: cloud.rows,
               stats: stats,
-              cloudNote: _cloudNote,
-              busy: _cloudBusy,
+              // 出错时优先如实展示失败原因，否则展示最近一次同步结论
+              cloudNote: cloud.error ?? cloud.note,
+              busy: cloud.syncing,
               loggedIn: session.isLoggedIn,
               hideDetails: _hideTaskDetails,
               onToggleDetails: () =>
                   setState(() => _hideTaskDetails = !_hideTaskDetails),
-              onRefresh: _pull,
+              onRefresh: () =>
+                  ref.read(cloudSyncControllerProvider.notifier).syncNow(),
             );
             if (!wide) {
               return Column(
@@ -271,19 +192,19 @@ class _OverviewPageState extends ConsumerState<OverviewPage> {
                   icon: Icons.grid_view_outlined,
                   title: '去发现 →',
                   desc: '豆瓣海报墙 · 热门推荐',
-                  index: 1,
+                  route: AppRoute.discover,
                 ),
                 _Shortcut(
                   icon: Icons.search,
                   title: '去搜索 →',
                   desc: '多源聚合 · 去重排序',
-                  index: 2,
+                  route: AppRoute.search,
                 ),
                 _Shortcut(
                   icon: Icons.download_for_offline_outlined,
                   title: '去导入 →',
                   desc: '扫码登录 · 任务看板',
-                  index: 3,
+                  route: AppRoute.import,
                 ),
               ],
             );
@@ -299,18 +220,20 @@ class _Shortcut extends ConsumerWidget {
     required this.icon,
     required this.title,
     required this.desc,
-    required this.index,
+    required this.route,
   });
   final IconData icon;
   final String title;
   final String desc;
-  final int index;
+
+  /// 跳转目标：用路由枚举，不用 int 下标（插页不会静默错位）
+  final AppRoute route;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = context.t;
     return HubCard(
-      onTap: () => ref.read(navIndexProvider.notifier).select(index),
+      onTap: () => ref.read(navIndexProvider.notifier).select(route),
       child: Row(
         children: <Widget>[
           Icon(icon, color: t.accent, size: 22),

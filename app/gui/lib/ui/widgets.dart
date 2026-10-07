@@ -26,7 +26,7 @@ class HubCard extends StatelessWidget {
     final t = context.t;
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
-        color: t.surfaceSolid,
+        color: t.surface1,
         borderRadius: BorderRadius.circular(18),
         border: dashed
             ? Border.all(color: t.border, style: BorderStyle.solid)
@@ -150,7 +150,7 @@ class GhostButton extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border.all(color: t.border),
             borderRadius: BorderRadius.circular(12),
-            color: t.surface,
+            color: t.surface1,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -198,7 +198,7 @@ class HubChip extends StatelessWidget {
     final Widget inner = Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
-        color: selected ? c.withValues(alpha: 0.14) : t.surface,
+        color: selected ? c.withValues(alpha: 0.14) : t.surface1,
         border: Border.all(color: selected ? t.borderStrong : t.border),
         borderRadius: BorderRadius.circular(999),
       ),
@@ -294,11 +294,9 @@ class _SkeletonBoxState extends State<SkeletonBox>
           gradient: LinearGradient(
             begin: Alignment(_c.value * 2 - 1, 0),
             end: Alignment(_c.value * 2, 0),
-            colors: <Color>[
-              t.surface,
-              t.textDim.withValues(alpha: 0.18),
-              t.surface,
-            ],
+            // 骨架屏扫光：底用 surface1、高光用亮一档的 surface2。
+            // 原先两端用半透明的 surface（规范 §3.9 已弃用），叠在渐变换底上不可控。
+            colors: <Color>[t.surface1, t.surface2, t.surface1],
           ),
         ),
       ),
@@ -386,7 +384,7 @@ class HubSegmented<T> extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: selected ? t.surfaceSolid : Colors.transparent,
+                    color: selected ? t.surface1 : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                     boxShadow: selected
                         ? <BoxShadow>[
@@ -448,7 +446,7 @@ class HubDropdown<T> extends StatelessWidget {
       height: 38,
       constraints: BoxConstraints(minWidth: minWidth),
       decoration: BoxDecoration(
-        color: t.surfaceSolid,
+        color: t.surface1,
         border: Border.all(color: t.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -458,7 +456,7 @@ class HubDropdown<T> extends StatelessWidget {
           tooltip: label,
           offset: const Offset(0, 44),
           padding: EdgeInsets.zero,
-          color: t.surfaceSolid,
+          color: t.surface1,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(color: t.border),

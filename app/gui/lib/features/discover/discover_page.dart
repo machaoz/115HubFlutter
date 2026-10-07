@@ -996,7 +996,7 @@ class SubjectDetailDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.t;
     return Dialog(
-      backgroundColor: t.surfaceSolid,
+      backgroundColor: t.surface1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(color: t.border),
@@ -1474,7 +1474,7 @@ class _RefreshButton extends StatelessWidget {
       child: Container(
         height: 38,
         decoration: BoxDecoration(
-          color: t.surfaceSolid,
+          color: t.surface1,
           border: Border.all(color: busy ? t.accent : t.border),
           borderRadius: BorderRadius.circular(12),
         ),

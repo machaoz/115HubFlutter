@@ -4,7 +4,7 @@ add_library(hub_native SHARED
 )
 
 target_include_directories(hub_native PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(hub_native PRIVATE hub::log hub_baselib hub_network hub_system)
+target_link_libraries(hub_native PRIVATE hub::log hub_baselib hub_network hub_system hub::media)
 
 # 只导出 hub_ 前缀符号，收敛 ABI 面
 if(MSVC)

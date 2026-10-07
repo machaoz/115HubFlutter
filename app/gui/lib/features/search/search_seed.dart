@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/navigation/app_route.dart';
 import '../../state/providers.dart';
 
 /// 从「发现」等页面跳转到搜索时携带的检索意图。
@@ -25,7 +26,9 @@ final ValueNotifier<SearchSeed?> searchSeedNotifier =
 /// 跳转搜索页并注入检索意图
 void goToSearch(BuildContext context, SearchSeed seed) {
   searchSeedNotifier.value = seed;
-  ProviderScope.containerOf(context).read(navIndexProvider.notifier).select(2);
+  ProviderScope.containerOf(context)
+      .read(navIndexProvider.notifier)
+      .select(AppRoute.search);
 }
 
 /// 纯函数：决定是否需要「回退检索」，以及回退词是什么。

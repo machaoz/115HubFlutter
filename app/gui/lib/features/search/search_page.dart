@@ -10,6 +10,7 @@ import '../../core/db/hub_database.dart';
 import '../../core/db/repos.dart';
 import '../../core/db/settings.dart';
 import '../../sources/source.dart';
+import '../../state/cloud_sync_controller.dart';
 import '../../state/providers.dart';
 import '../../ui/theme.dart';
 import '../../ui/widgets.dart';
@@ -477,7 +478,7 @@ class _HistoryChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: t.surface,
+        color: t.surface1,
         border: Border.all(color: t.border),
         borderRadius: BorderRadius.circular(999),
       ),
@@ -654,6 +655,12 @@ class _ResultRow extends StatelessWidget {
                             target: item.copyTarget,
                             title: item.title,
                           );
+                          // 概览页/导入页读的是 CloudSyncController 的快照，
+                          // 未登录或轮询关闭时不会有定时器帮我们刷 —— 这里必须
+                          // 手动刷一次，否则跳过去看板空白，用户会以为没入队。
+                          ProviderScope.containerOf(context)
+                              .read(cloudSyncControllerProvider.notifier)
+                              .refreshLocal();
                           showHubToast(context, '已加入导入队列');
                         } catch (e) {
                           showHubToast(context, '入队失败：$e');
@@ -719,7 +726,7 @@ class _ActBtn extends StatelessWidget {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: t.surface,
+          color: t.surface1,
           border: Border.all(color: t.border),
           borderRadius: BorderRadius.circular(11),
         ),

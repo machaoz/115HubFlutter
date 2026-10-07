@@ -5,6 +5,9 @@
 # 用法：
 #   ./lunch all                全量编译打包（默认 debug）→ debug/Magnetic115Hub/
 #   ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
+#   ./lunch all -w             debug 打包跳过 flutter test（快速迭代，见下）
+#                              注：-w/--no-test 只对 debug 生效；release 强制跑测试，
+#                                  且只跳过 flutter test —— 格式与静态分析是硬门槛，不跳。
 #   ./lunch gui                只构建 gui 模块（Flutter，默认 debug）
 #   ./lunch gui --release      只构建 gui 模块（release）
 #   ./lunch quality            格式 + 分析 + 纯 Dart 护栏 + 非原生测试
@@ -165,18 +168,44 @@ lunch_quality() {
     "$FLUTTER_BIN" pub get
     # 格式门禁：失败就停，但要说明白是「格式未对齐」而非静默中止（否则 all 分支
     # 会在此处断掉，后续 lunch_package 不执行，表现为 debug/ 产物时间不变）。
-    if ! dart format --output=none --set-exit-if-changed lib test .tools; then
-      fail "dart format 校验未通过：上方列出的文件格式未对齐。执行 'dart format lib test .tools' 修复后重试。"
+    if ! dart format --output=none --set-exit-if-changed lib test .tools tool; then
+      fail "dart format 校验未通过：上方列出的文件格式未对齐。执行 'dart format lib test .tools tool' 修复后重试。"
     fi
     "$FLUTTER_BIN" analyze
-    dart run .tools/qr_classify_check.dart
-    dart run .tools/pan115_task_check.dart
-    dart run .tools/search_fallback_check.dart
-    dart run .tools/source_protocol_check.dart
-    dart run .tools/person_catalog_check.dart
-    dart run .tools/session_cookie_check.dart
-    dart run .tools/shell_layout_check.dart
-    "$FLUTTER_BIN" test --exclude-tags native
+    # 护栏清单唯一数据源（新增护栏只需改那个文件，不必动 lunch / CI）
+    # 逐个跑而不用 `xargs` 批量：任一个失败要立刻停，且日志要指名是哪个护栏挂的。
+    GUARDS="$GUI_DIR/.tools/guards.txt"
+    [ -f "$GUARDS" ] || fail "护栏清单不存在：$GUARDS"
+    expected=$(awk '{gsub(/^[ \t]+|[ \t]+$/,"")}
+                    $0 != "" && substr($0,1,1) != "#" {n++} END{print n+0}' "$GUARDS")
+    ran=0
+    while IFS= read -r line || [ -n "$line" ]; do
+      g=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      case "$g" in ''|'#'*) continue ;; esac
+      # 格式校验：非注释行必须是干净的脚本路径。错解码会产生 "# ...tool/x.dart"
+      # 这类畸形行 —— 不匹配就中止，绝不允许降级成注释被悄悄略过。
+      case "$g" in
+        *[!A-Za-z0-9_./-]*) fail "护栏清单格式非法（疑似编码错乱）：[$g]" ;;
+        *.dart) ;;
+        *) fail "护栏清单格式非法（不是 .dart 脚本）：[$g]" ;;
+      esac
+      [ -f "$GUI_DIR/$g" ] || fail "护栏清单里的脚本不存在：$g（清单：$GUARDS）"
+      say "护栏：$g"
+      dart "$g" || fail "护栏失败：$g"
+      ran=$((ran + 1))
+    done < "$GUARDS"
+    # 自维护不变量：实跑数必须等于清单有效行数，差额非零 = 有护栏被静默跳过
+    [ "$ran" -eq "$expected" ] \
+      || fail "护栏执行数不符：清单 $expected 行，实跑 $ran 个"
+    ok "护栏全部通过（$ran / $expected）"
+    # 测试门禁：debug 可显式跳过（快速迭代），release 强制跑、不允许跳过。
+    # 注意只跳过 flutter test —— 格式与静态分析很快且是硬门槛，不跳过。
+    if [ "$NO_TEST" = "1" ] && [ "$MODE" != "release" ]; then
+      warn "跳过 flutter test（debug + 已指定 --no-test/-w）。格式/分析/护栏仍已执行。"
+    else
+      [ "$MODE" = "release" ] && say "release 构建：强制执行 flutter test"
+      "$FLUTTER_BIN" test --exclude-tags native
+    fi
   )
   ok "Flutter 质量门禁通过"
 }
@@ -255,10 +284,13 @@ lunch_package() {
 # 参数解析
 # ---------------------------------------------------------------------------
 MODE="debug"
+NO_TEST=0
 for a in "$@"; do
   case "$a" in
     --release|-r) MODE="release" ;;
     --debug|-d)    MODE="debug" ;;
+    # 跳过 flutter test（debug 快速迭代用）。release 构建强制跑，见 lunch_quality。
+    --no-test|-w)  NO_TEST=1 ;;
   esac
 done
 
@@ -313,6 +345,7 @@ lunch —— 115HubFlutter 构建编排
   ./lunch all                全量编译打包（默认 debug）→ debug/Magnetic115Hub/
   ./lunch all --release      全量编译打包（release）→ release/Magnetic115Hub/
   ./lunch gui [--release]    只构建 gui（Flutter，构建前自动执行质量门禁）
+  ./lunch all -w             debug 打包跳过 flutter test（快速迭代；release 强制跑）
   ./lunch quality            运行格式、静态分析、纯 Dart 护栏与非原生测试
   ./lunch native [--release] 只构建原生模块 + hub_native.dll（含冒烟）
   ./lunch baselib|network|system [--release]   只构建对应原生模块

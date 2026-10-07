@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'hub_database.dart';
 import 'shell_layout.dart';
+import '../navigation/app_route.dart';
 import '../util/logger.dart';
 
 // 壳层布局类型放在零依赖的 shell_layout.dart（可用纯 Dart 脚本复跑断言），
@@ -33,6 +34,31 @@ extension ThemePresetIdX on ThemePresetId {
       if (v.name == raw) return v;
     }
     return fallback;
+  }
+}
+
+/// 界面图标风格（4.0 High-2「图标配置」放开给用户的一档）
+///
+/// 只作用于**导航/工具栏这类有成对「描边 + 填充」图标的位置**：
+/// `PageDescriptor` 本来就同时提供 `icon`（描边）与 `activeIcon`（填充），
+/// 这里决定「是否跟随选中态切换」。
+///
+/// 放在 core 层（与 [ThemePresetId] 同理），避免 core → ui 的反向依赖。
+enum AppIconStyle {
+  /// 跟随选中态：未选中描边、选中填充（4.0 之前的既有行为，保持默认）
+  auto,
+
+  /// 恒定描边：选中与否都用描边图标（更安静，接近 macOS 侧栏观感）
+  outline,
+
+  /// 恒定填充：选中与否都用填充图标（Windows 11 任务栏式）
+  filled;
+
+  static AppIconStyle parse(String? raw) {
+    for (final v in AppIconStyle.values) {
+      if (v.name == raw) return v;
+    }
+    return AppIconStyle.auto;
   }
 }
 
@@ -165,6 +191,30 @@ class NetworkSettings {
   );
 }
 
+/// 本地媒体库设置（4.0 B1-S1：本轮只做本地视频源）
+///
+/// 【为什么扫描目录要进设置而不是写死在页面里】
+/// 写死 = 每个用户第一次进媒体页都被扫同一个（多半不存在的）路径，扫不到也说不清
+/// 为什么。进设置后口径统一为：**页面从设置读，用户在媒体页里改完写回设置**，
+/// 下次启动还在；取不到（空串）时页面必须给出「选择目录」入口，
+/// 不得自作主张拿 USERPROFILE / 盘根目录去扫。
+class MediaSettings {
+  const MediaSettings({this.directory = ''});
+
+  /// 本地视频目录。空串 = 尚未配置。
+  final String directory;
+
+  bool get hasDirectory => directory.isNotEmpty;
+
+  MediaSettings copyWith({String? directory}) =>
+      MediaSettings(directory: directory ?? this.directory);
+
+  JsonMap toJson() => <String, dynamic>{'directory': directory};
+
+  static MediaSettings from(JsonMap? j) =>
+      MediaSettings(directory: (j?['directory'] as String?)?.trim() ?? '');
+}
+
 /// 搜索设置
 class SearchSettings {
   const SearchSettings({
@@ -260,24 +310,43 @@ class RecommendSettings {
   );
 }
 
-/// 启动页定义集中处 —— 新增导航页时只需在此登记 id 与索引
+/// 启动页定义集中处 —— 存 **route id 字符串**（见 AppRoute），不再存下标
+///
+/// 【为什么不再存 int】int 是「页面顺序」的隐式契约：插入一个新页，老用户的
+/// 启动页就整段错位。改存 id 后顺序怎么调都不受影响。
 class StartPage {
   const StartPage._();
 
-  /// 启动页 id → 导航索引（与 app.dart 的 _pages 顺序严格一致）
-  static const Map<String, int> startPageIds = <String, int>{
-    'overview': 0, // 概览
-    'discover': 1, // 发现
-    'search': 2, // 搜索
-    'import': 3, // 导入
-    'library': 4, // 收藏库
-    'settings': 5, // 设置
-  };
+  /// 可选启动页路由 —— **只给可见路由**。
+  ///
+  /// 不可见的页不能当启动页：用户选中后下次启动会因该页不在导航里而落到别处，
+  /// 是「设置显示 A、实际落到 B」的静默不一致。
+  static List<AppRoute> get startPageRoutes => AppRouteX.visibleValues;
 
-  static String normalizeStartPage(String? raw) =>
-      startPageIds.containsKey(raw) ? raw! : 'discover';
+  /// 下拉/选择器直接吃的选项：`(id:, label:)` 命名 record。
+  ///
+  /// 【为什么要这层包装】调用点不用 import 任何路由文件就能拿到 id 与中文标签，
+  /// 也就不会「搬代码忘带 import」（`AppRoute.id`／`label` 是扩展成员，漏 import
+  /// 会报 undefined_getter —— 这个坑在切分设置页时已经踩过两次）。
+  static List<({String id, String label})> get startPageOptions =>
+      startPageRoutes
+          .map((r) => (id: r.id, label: r.label))
+          .toList(growable: false);
 
-  static int startPageIndex(String id) => startPageIds[id] ?? 1;
+  /// 脏值 → 安全回落：**绝不抛异常**
+  ///
+  /// 历史数据兼容：早期版本把启动页写成 int 下标（0 概览 … 5 设置），
+  /// 也可能写成数字字符串。AppRouteX.parse 会按下标还原；越界/未知一律回落默认。
+  /// 这里若抛异常，会被 SettingsRepo.get() 的 catch 吞掉并**整包重置设置**
+  /// （ShellLayoutSettings 曾踩过这个坑），因此必须静默回落。
+  static AppRoute startPageRoute(Object? raw) {
+    final r = AppRouteX.parse(raw, AppRouteX.defaultStart);
+    // 未完工（不可见）的路由即便库里存着也不生效，落回默认页
+    return r.visible ? r : AppRouteX.defaultStart;
+  }
+
+  /// 归一化成可持久化的 route id
+  static String normalizeStartPage(Object? raw) => startPageRoute(raw).id;
 }
 
 /// 应用设置整包（对应 Electron 版 app_settings.settings_json）
@@ -287,12 +356,19 @@ class AppSettings {
     this.themePreset = 'graphite',
     this.customDark = true,
     this.customAccent = 0xFFFF7A2F,
+    this.fontFamily = 'harmonyOS',
+    // 存字符串（与 fontFamily / themePreset 同口径）：settings 层不依赖 UI，
+    // 且 `.name` 是 extension getter，不能出现在 const 表达式里。
+    this.iconStyle = 'auto',
+    this.soundEnabled = true,
+    this.soundVolume = 0.7,
     this.launchAtLogin = false,
     this.minimizeToTray = true,
     this.startPage = 'discover',
     this.search = const SearchSettings(),
     this.recommend = const RecommendSettings(),
     this.network = const NetworkSettings(),
+    this.media = const MediaSettings(),
     this.pan115 = const Pan115Settings(),
     this.shellLayout = const ShellLayoutSettings(),
     this.autoBackup = true,
@@ -309,15 +385,29 @@ class AppSettings {
   final bool customDark;
   final int customAccent;
 
+  /// 正文字体族：`system` 跟随系统默认 / `harmonyOS` 用包内 HarmonyOS Sans SC。
+  /// 取值见 lib/ui/theme.dart 的 AppFontFamily（此处只存字符串，settings 层不依赖 UI）。
+  final String fontFamily;
+
+  /// 界面图标风格：auto / outline / filled（见 [AppIconStyle]）
+  final String iconStyle;
+
+  /// 提示音开关与音量（复用 media_kit Player 播放 assets/sounds 下的短音频）
+  final bool soundEnabled;
+  final double soundVolume;
+
   final bool launchAtLogin;
   final bool minimizeToTray;
 
-  /// 启动后默认落地页 id（见 StartPage.startPageIds），默认「发现」
+  /// 启动后默认落地页 id（见 StartPage.startPageRoutes），默认「发现」
   final String startPage;
 
   final SearchSettings search;
   final RecommendSettings recommend;
   final NetworkSettings network;
+
+  /// 本地媒体库（扫描目录等）
+  final MediaSettings media;
 
   /// 115 会话（绑定设备槽位 + 云端进度轮询）
   final Pan115Settings pan115;
@@ -336,12 +426,17 @@ class AppSettings {
     String? themePreset,
     bool? customDark,
     int? customAccent,
+    String? fontFamily,
+    String? iconStyle,
+    bool? soundEnabled,
+    double? soundVolume,
     bool? launchAtLogin,
     bool? minimizeToTray,
     String? startPage,
     SearchSettings? search,
     RecommendSettings? recommend,
     NetworkSettings? network,
+    MediaSettings? media,
     Pan115Settings? pan115,
     ShellLayoutSettings? shellLayout,
     bool? autoBackup,
@@ -351,12 +446,17 @@ class AppSettings {
     themePreset: themePreset ?? this.themePreset,
     customDark: customDark ?? this.customDark,
     customAccent: customAccent ?? this.customAccent,
+    fontFamily: fontFamily ?? this.fontFamily,
+    iconStyle: AppIconStyle.parse(iconStyle ?? this.iconStyle).name,
+    soundEnabled: soundEnabled ?? this.soundEnabled,
+    soundVolume: soundVolume ?? this.soundVolume,
     launchAtLogin: launchAtLogin ?? this.launchAtLogin,
     minimizeToTray: minimizeToTray ?? this.minimizeToTray,
     startPage: StartPage.normalizeStartPage(startPage ?? this.startPage),
     search: search ?? this.search,
     recommend: recommend ?? this.recommend,
     network: network ?? this.network,
+    media: media ?? this.media,
     pan115: pan115 ?? this.pan115,
     shellLayout: shellLayout ?? this.shellLayout,
     autoBackup: autoBackup ?? this.autoBackup,
@@ -369,6 +469,10 @@ class AppSettings {
       'themePreset': themePreset,
       'customDark': customDark,
       'customAccent': customAccent,
+      'fontFamily': fontFamily,
+      'iconStyle': iconStyle,
+      'soundEnabled': soundEnabled,
+      'soundVolume': soundVolume,
       'launchAtLogin': launchAtLogin,
       'minimizeToTray': minimizeToTray,
       'startPage': startPage,
@@ -376,6 +480,7 @@ class AppSettings {
     'search': search.toJson(),
     'recommend': recommend.toJson(),
     'network': network.toJson(),
+    'media': media.toJson(),
     'pan115': pan115.toJson(),
     'shell': shellLayout.toJson(),
     'data': <String, dynamic>{
@@ -408,12 +513,22 @@ class AppSettings {
       themePreset: preset,
       customDark: g['customDark'] != false,
       customAccent: clampInt(g['customAccent'], 0xFFFF7A2F, 0, 0xFFFFFFFF),
+      // 旧库无 fontFamily：默认包内 HarmonyOS Sans（4.0 起随包内置）
+      fontFamily: (g['fontFamily']?.toString() == 'system')
+          ? 'system'
+          : 'harmonyOS',
+      // 旧库无 iconStyle → 保持既有观感（跟随选中态）
+      iconStyle: AppIconStyle.parse(g['iconStyle']?.toString()).name,
+      soundEnabled: g['soundEnabled'] != false,
+      soundVolume: clampNum(g['soundVolume'], 0.7, 0, 1),
       launchAtLogin: g['launchAtLogin'] == true,
       minimizeToTray: g['minimizeToTray'] != false,
       startPage: StartPage.normalizeStartPage(g['startPage']?.toString()),
       search: SearchSettings.from(j['search'] as JsonMap?),
       recommend: RecommendSettings.from(j['recommend'] as JsonMap?),
       network: NetworkSettings.from(j['network'] as JsonMap?),
+      // 旧库无 'media' → 空目录，页面据此弹「选择目录」入口
+      media: MediaSettings.from(asMap(j['media'])),
       pan115: Pan115Settings.from(j['pan115'] as JsonMap?),
       // 旧库无 'shell'（也可能落在 general 下）→ 全取默认，且不因类型异常崩掉
       shellLayout: ShellLayoutSettings.from(

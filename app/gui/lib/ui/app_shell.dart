@@ -5,32 +5,10 @@ import 'package:window_manager/window_manager.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import '../core/util/version.dart';
+import '../navigation/app_routes.dart';
 import '../state/providers.dart';
 import '../state/session.dart';
 import '../core/db/settings.dart';
-
-/// 导航目标
-///
-/// [icon] 为常态图标，[activeIcon] 为激活态图标（通常为 filled 版本）：
-/// 点击后由 [_NavIcon] 做交叉淡入 + 缩放切换，让「我在哪一页」一眼可辨。
-class NavItem {
-  const NavItem({
-    required this.label,
-    required this.icon,
-    required this.page,
-    this.activeIcon,
-    this.spinOnActivate = false,
-  });
-  final String label;
-  final IconData icon;
-  final Widget page;
-
-  /// 激活态图标；未指定时退化为 [icon]
-  final IconData? activeIcon;
-
-  /// 激活时图标旋转一圈（设置齿轮的记忆点）
-  final bool spinOnActivate;
-}
 
 /// auto 的真实落位：窄屏（<760）落底栏，否则左侧栏
 NavPosition resolveNavPosition(NavPosition pref, double width) {
@@ -44,13 +22,22 @@ NavPosition resolveNavPosition(NavPosition pref, double width) {
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key, required this.pages});
 
-  final List<NavItem> pages;
+  /// 页面注册表（通常直接传 `kAppPages`）
+  final List<PageDescriptor> pages;
 
   @override
   ConsumerState<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends ConsumerState<AppShell> with WindowListener {
+  /// 导航里真正展示的页（过滤掉 AppRoute.visible == false 的未完工页面）
+  late final List<PageDescriptor> _pages = visiblePagesOf(widget.pages);
+
+  /// 页面实例只构造一次并复用：IndexedStack 内各页的滚动位置 / 输入 / 加载态不丢
+  late final List<Widget> _pageViews = _pages
+      .map((p) => p.builder(context))
+      .toList(growable: false);
+
   @override
   void initState() {
     super.initState();
@@ -73,7 +60,9 @@ class _AppShellState extends ConsumerState<AppShell> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final index = ref.watch(navIndexProvider);
+    final route = ref.watch(navIndexProvider);
+    // 可见序：导航栏与 IndexedStack 共用同一套下标
+    final index = visibleIndex(route, _pages);
     final layout = ref.watch(appSettingsProvider).shellLayout;
 
     return Scaffold(
@@ -96,7 +85,7 @@ class _AppShellState extends ConsumerState<AppShell> with WindowListener {
                     layout.statusBarPosition == StatusBarPosition.top)
                   _StatusBar(
                     index: index,
-                    items: widget.pages,
+                    items: _pages,
                     layout: layout,
                     onTop: true,
                   ),
@@ -105,43 +94,46 @@ class _AppShellState extends ConsumerState<AppShell> with WindowListener {
                     children: <Widget>[
                       if (nav == NavPosition.left)
                         _NavRail(
-                          items: widget.pages,
+                          items: _pages,
                           index: index,
                           iconOnly: iconOnly,
-                          onSelect: (i) =>
-                              ref.read(navIndexProvider.notifier).select(i),
+                          onSelect: (i) => ref
+                              .read(navIndexProvider.notifier)
+                              .select(visibleRouteAt(i, _pages)),
                         ),
                       Expanded(
                         child: _PageSwitchTransition(
                           index: index,
                           child: IndexedStack(
                             index: index,
-                            children: widget.pages.map((e) => e.page).toList(),
+                            children: _pageViews,
                           ),
                         ),
                       ),
                       if (nav == NavPosition.right)
                         _NavRail(
-                          items: widget.pages,
+                          items: _pages,
                           index: index,
                           iconOnly: iconOnly,
                           alignRight: true,
-                          onSelect: (i) =>
-                              ref.read(navIndexProvider.notifier).select(i),
+                          onSelect: (i) => ref
+                              .read(navIndexProvider.notifier)
+                              .select(visibleRouteAt(i, _pages)),
                         ),
                     ],
                   ),
                 ),
                 if (showStatus &&
                     layout.statusBarPosition == StatusBarPosition.bottom)
-                  _StatusBar(index: index, items: widget.pages, layout: layout),
+                  _StatusBar(index: index, items: _pages, layout: layout),
                 if (nav == NavPosition.bottom)
                   _BottomNav(
-                    items: widget.pages,
+                    items: _pages,
                     index: index,
                     showLabels: layout.showNavLabels,
-                    onSelect: (i) =>
-                        ref.read(navIndexProvider.notifier).select(i),
+                    onSelect: (i) => ref
+                        .read(navIndexProvider.notifier)
+                        .select(visibleRouteAt(i, _pages)),
                   ),
               ],
             );
@@ -223,33 +215,18 @@ class _TitleBar extends ConsumerWidget {
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          color: t.surfaceSolid.withValues(alpha: 0.92),
+          color: t.surface1.withValues(alpha: 0.92),
           border: Border(bottom: BorderSide(color: t.border)),
         ),
         child: Row(
           children: <Widget>[
-            Container(
+            // UI-1：标题栏品牌位用定稿 logo（棱镜框 + 三层资源堆叠），
+            // 不再用「磁」文本字形——与桌面/任务栏图标同源（assets/brand/）。
+            Image.asset(
+              'assets/brand/hub_mark_256.png',
               width: 30,
               height: 30,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: <Color>[t.accent, t.accent2]),
-                borderRadius: BorderRadius.circular(9),
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: t.accent.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                '磁',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                ),
-              ),
+              filterQuality: FilterQuality.medium,
             ),
             const SizedBox(width: 10),
             Text(
@@ -273,7 +250,7 @@ class _TitleBar extends ConsumerWidget {
                     width: 34,
                     height: 30,
                     decoration: BoxDecoration(
-                      color: t.surface,
+                      color: t.surface1,
                       border: Border.all(color: t.border),
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -350,7 +327,7 @@ class _WinBtn extends StatelessWidget {
           width: 34,
           height: 30,
           decoration: BoxDecoration(
-            color: t.surface,
+            color: t.surface1,
             border: Border.all(color: t.border),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -383,7 +360,7 @@ class _SessionPulse extends ConsumerWidget {
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: t.surface,
+        color: t.surface1,
         border: Border.all(color: t.borderStrong),
         borderRadius: BorderRadius.circular(999),
       ),
@@ -419,11 +396,10 @@ class _ThemePicker extends ConsumerWidget {
       ThemePresetId.custom => '自定义',
       _ => presetById(current)?.name ?? '主题',
     };
-    final settingsIndex = StartPage.startPageIndex('settings');
     return PopupMenuButton<_ThemeEntry>(
       tooltip: '主题：$label',
       position: PopupMenuPosition.under,
-      color: t.surfaceSolid,
+      color: t.surface1,
       onSelected: (v) {
         final ctl = ref.read(appSettingsProvider.notifier);
         // 从「自定义」切回「预设主题」时落到默认预设，保证模式与状态一致
@@ -433,7 +409,7 @@ class _ThemePicker extends ConsumerWidget {
         if (v == _ThemeEntry.custom) {
           ctl.patchThemePreset(ThemePresetId.custom);
         }
-        ref.read(navIndexProvider.notifier).select(settingsIndex);
+        ref.read(navIndexProvider.notifier).select(AppRoute.settings);
       },
       itemBuilder: (context) => <PopupMenuEntry<_ThemeEntry>>[
         PopupMenuItem<_ThemeEntry>(
@@ -462,7 +438,7 @@ class _ThemePicker extends ConsumerWidget {
           width: 34,
           height: 30,
           decoration: BoxDecoration(
-            color: t.surface,
+            color: t.surface1,
             border: Border.all(color: t.border),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -532,45 +508,61 @@ class _MenuRow extends StatelessWidget {
 // -------------------------------------------------------------------- 导航栏
 
 /// 导航图标：常态 ↔ 激活态交叉切换（缩放 + 淡入），激活时齿轮旋转一圈
-class _NavIcon extends StatelessWidget {
+///
+/// 4.0 起受「设置 → 主题 → 图标风格」影响（[AppIconStyle]）：
+/// auto 跟随选中态；outline / filled 恒定取其中一种，选中与否不再换图标。
+class _NavIcon extends ConsumerWidget {
   const _NavIcon({
     required this.item,
     required this.selected,
     required this.color,
   });
 
-  final NavItem item;
+  final PageDescriptor item;
   final bool selected;
   final Color color;
 
   /// 侧栏/底栏统一图标尺寸
   static const double _size = 20;
 
+  /// 按图标风格解析出本帧该画哪个图标。
+  ///
+  /// [activeIcon] 可能缺失（如未完工页面只给了描边图标），此时无论哪种风格
+  /// 都退化为 [PageDescriptor.icon] —— 宁可少一次切换，也不画空白。
+  IconData _resolve(AppIconStyle style) {
+    final filled = item.activeIcon ?? item.icon;
+    final outlined = item.icon;
+    return switch (style) {
+      AppIconStyle.auto => selected ? filled : outlined,
+      AppIconStyle.outline => outlined,
+      AppIconStyle.filled => filled,
+    };
+  }
+
   @override
-  Widget build(BuildContext context) {
-    final data = (selected ? item.activeIcon : item.icon) ?? item.icon;
-    return AnimatedRotation(
-      turns: item.spinOnActivate && selected ? 1 : 0,
-      duration: const Duration(milliseconds: 520),
-      curve: Curves.easeOutBack,
-      child: AnimatedScale(
-        scale: selected ? 1.08 : 1,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, anim) => ScaleTransition(
-            scale: Tween<double>(begin: 0.8, end: 1).animate(anim),
-            child: FadeTransition(opacity: anim, child: child),
-          ),
-          child: Icon(
-            data,
-            key: ValueKey<IconData>(data),
-            size: _size,
-            color: color,
-          ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = AppIconStyle.parse(ref.watch(appSettingsProvider).iconStyle);
+    final data = _resolve(style);
+    // 动效全项统一（UI-2）：激活=缩放 1.08 + 图标交叉淡入，不再给设置齿轮
+    // 单开「旋转一圈」特例（此前只有 settings 的 spinOnActivate=true，
+    // 其余项无动效记忆点，观感割裂）。
+    return AnimatedScale(
+      scale: selected ? 1.08 : 1,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, anim) => ScaleTransition(
+          scale: Tween<double>(begin: 0.8, end: 1).animate(anim),
+          child: FadeTransition(opacity: anim, child: child),
+        ),
+        child: Icon(
+          data,
+          key: ValueKey<IconData>(data),
+          size: _size,
+          color: color,
         ),
       ),
     );
@@ -586,7 +578,7 @@ class _NavRail extends StatelessWidget {
     this.alignRight = false,
   });
 
-  final List<NavItem> items;
+  final List<PageDescriptor> items;
   final int index;
   final bool iconOnly;
   final ValueChanged<int> onSelect;
@@ -666,9 +658,7 @@ class _NavRail extends StatelessWidget {
                                 ? Alignment.center
                                 : Alignment.centerLeft,
                             decoration: BoxDecoration(
-                              color: selected
-                                  ? t.surfaceSolid
-                                  : Colors.transparent,
+                              color: selected ? t.surface1 : Colors.transparent,
                               border: Border.all(
                                 color: selected ? t.border : Colors.transparent,
                               ),
@@ -729,7 +719,7 @@ class _BottomNav extends StatelessWidget {
     required this.showLabels,
     required this.onSelect,
   });
-  final List<NavItem> items;
+  final List<PageDescriptor> items;
   final int index;
   final bool showLabels;
   final ValueChanged<int> onSelect;
@@ -739,7 +729,7 @@ class _BottomNav extends StatelessWidget {
     final t = context.t;
     return Container(
       decoration: BoxDecoration(
-        color: t.surfaceSolid.withValues(alpha: 0.95),
+        color: t.surface1.withValues(alpha: 0.95),
         border: Border(top: BorderSide(color: t.border)),
       ),
       child: SafeArea(
@@ -801,7 +791,7 @@ class _StatusBar extends ConsumerWidget {
     this.onTop = false,
   });
   final int index;
-  final List<NavItem> items;
+  final List<PageDescriptor> items;
   final ShellLayoutSettings layout;
   final bool onTop;
 

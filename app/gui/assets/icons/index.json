@@ -1,0 +1,1618 @@
+{
+  "meta": {
+    "family": "HubIcons",
+    "fontFile": "hub_icons.ttf",
+    "upem": 1000,
+    "ascent": 1000,
+    "descent": 0,
+    "firstCodepoint": "0xE000",
+    "count": 122,
+    "source": "Fluent UI System Icons (@fluentui/svg-icons, 24px regular/filled)",
+    "license": "MIT",
+    "licenseFile": "LICENSE.txt",
+    "colors": {
+      "action": 32,
+      "media": 27,
+      "nav": 21,
+      "setting": 24,
+      "status": 18
+    }
+  },
+  "icons": {
+    "action_add": {
+      "codepoint": 57344,
+      "code": "0xE000",
+      "file": "action_add.svg",
+      "source": "add_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "添加",
+        "新建",
+        "add",
+        "plus"
+      ]
+    },
+    "action_cancel": {
+      "codepoint": 57345,
+      "code": "0xE001",
+      "file": "action_cancel.svg",
+      "source": "dismiss_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "取消",
+        "cancel"
+      ]
+    },
+    "action_check": {
+      "codepoint": 57346,
+      "code": "0xE002",
+      "file": "action_check.svg",
+      "source": "checkmark_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "勾选",
+        "确认",
+        "check",
+        "ok",
+        "tick"
+      ]
+    },
+    "action_check_filled": {
+      "codepoint": 57347,
+      "code": "0xE003",
+      "file": "action_check_filled.svg",
+      "source": "checkmark_24_filled.svg",
+      "style": "filled",
+      "category": "action",
+      "keywords": [
+        "勾选选中",
+        "check filled"
+      ]
+    },
+    "action_close": {
+      "codepoint": 57348,
+      "code": "0xE004",
+      "file": "action_close.svg",
+      "source": "dismiss_circle_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "关闭",
+        "close",
+        "x"
+      ]
+    },
+    "action_copy": {
+      "codepoint": 57349,
+      "code": "0xE005",
+      "file": "action_copy.svg",
+      "source": "copy_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "复制",
+        "copy",
+        "duplicate"
+      ]
+    },
+    "action_delete": {
+      "codepoint": 57350,
+      "code": "0xE006",
+      "file": "action_delete.svg",
+      "source": "delete_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "删除",
+        "移除",
+        "delete",
+        "trash",
+        "remove"
+      ]
+    },
+    "action_deselect_all": {
+      "codepoint": 57351,
+      "code": "0xE007",
+      "file": "action_deselect_all.svg",
+      "source": "select_all_off_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "取消全选",
+        "deselect all"
+      ]
+    },
+    "action_detail": {
+      "codepoint": 57352,
+      "code": "0xE008",
+      "file": "action_detail.svg",
+      "source": "info_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "详情",
+        "detail",
+        "info"
+      ]
+    },
+    "action_drag": {
+      "codepoint": 57353,
+      "code": "0xE009",
+      "file": "action_drag.svg",
+      "source": "drag_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "拖拽",
+        "drag",
+        "handle"
+      ]
+    },
+    "action_edit": {
+      "codepoint": 57354,
+      "code": "0xE00A",
+      "file": "action_edit.svg",
+      "source": "edit_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "编辑",
+        "修改",
+        "edit",
+        "pencil"
+      ]
+    },
+    "action_enlarge": {
+      "codepoint": 57355,
+      "code": "0xE00B",
+      "file": "action_enlarge.svg",
+      "source": "zoom_in_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "放大",
+        "zoom in",
+        "enlarge"
+      ]
+    },
+    "action_filter": {
+      "codepoint": 57356,
+      "code": "0xE00C",
+      "file": "action_filter.svg",
+      "source": "filter_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "筛选",
+        "过滤",
+        "filter",
+        "sift"
+      ]
+    },
+    "action_forbid": {
+      "codepoint": 57357,
+      "code": "0xE00D",
+      "file": "action_forbid.svg",
+      "source": "prohibited_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "禁止",
+        "forbid",
+        "ban"
+      ]
+    },
+    "action_history": {
+      "codepoint": 57358,
+      "code": "0xE00E",
+      "file": "action_history.svg",
+      "source": "history_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "历史",
+        "history",
+        "recent"
+      ]
+    },
+    "action_more": {
+      "codepoint": 57359,
+      "code": "0xE00F",
+      "file": "action_more.svg",
+      "source": "more_horizontal_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "更多",
+        "more",
+        "overflow"
+      ]
+    },
+    "action_more_list": {
+      "codepoint": 57360,
+      "code": "0xE010",
+      "file": "action_more_list.svg",
+      "source": "more_vertical_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "更多列表",
+        "more list"
+      ]
+    },
+    "action_move": {
+      "codepoint": 57361,
+      "code": "0xE011",
+      "file": "action_move.svg",
+      "source": "arrow_move_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "移动",
+        "move",
+        "transfer"
+      ]
+    },
+    "action_reduce": {
+      "codepoint": 57362,
+      "code": "0xE012",
+      "file": "action_reduce.svg",
+      "source": "zoom_out_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "缩小",
+        "zoom out",
+        "reduce"
+      ]
+    },
+    "action_refresh": {
+      "codepoint": 57363,
+      "code": "0xE013",
+      "file": "action_refresh.svg",
+      "source": "arrow_clockwise_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "刷新",
+        "refresh",
+        "reload"
+      ]
+    },
+    "action_remove": {
+      "codepoint": 57364,
+      "code": "0xE014",
+      "file": "action_remove.svg",
+      "source": "subtract_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "移出",
+        "remove",
+        "minus"
+      ]
+    },
+    "action_reset": {
+      "codepoint": 57365,
+      "code": "0xE015",
+      "file": "action_reset.svg",
+      "source": "arrow_reset_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "重置",
+        "reset",
+        "restore"
+      ]
+    },
+    "action_rotate": {
+      "codepoint": 57366,
+      "code": "0xE016",
+      "file": "action_rotate.svg",
+      "source": "arrow_rotate_clockwise_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "旋转",
+        "rotate"
+      ]
+    },
+    "action_save": {
+      "codepoint": 57367,
+      "code": "0xE017",
+      "file": "action_save.svg",
+      "source": "save_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "保存",
+        "save",
+        "floppy"
+      ]
+    },
+    "action_scan": {
+      "codepoint": 57368,
+      "code": "0xE018",
+      "file": "action_scan.svg",
+      "source": "scan_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "扫描",
+        "扫码",
+        "scan"
+      ]
+    },
+    "action_scan_input": {
+      "codepoint": 57369,
+      "code": "0xE019",
+      "file": "action_scan_input.svg",
+      "source": "scan_qr_code_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "扫码输入",
+        "qr scan",
+        "qrcode"
+      ]
+    },
+    "action_select_all": {
+      "codepoint": 57370,
+      "code": "0xE01A",
+      "file": "action_select_all.svg",
+      "source": "select_all_on_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "全选",
+        "select all"
+      ]
+    },
+    "action_share": {
+      "codepoint": 57371,
+      "code": "0xE01B",
+      "file": "action_share.svg",
+      "source": "share_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "分享",
+        "share",
+        "export"
+      ]
+    },
+    "action_sort": {
+      "codepoint": 57372,
+      "code": "0xE01C",
+      "file": "action_sort.svg",
+      "source": "arrow_sort_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "排序",
+        "sort",
+        "order"
+      ]
+    },
+    "action_sort_reverse": {
+      "codepoint": 57373,
+      "code": "0xE01D",
+      "file": "action_sort_reverse.svg",
+      "source": "text_sort_descending_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "倒序",
+        "sort reverse",
+        "desc"
+      ]
+    },
+    "action_timer": {
+      "codepoint": 57374,
+      "code": "0xE01E",
+      "file": "action_timer.svg",
+      "source": "timer_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "定时",
+        "timer",
+        "schedule"
+      ]
+    },
+    "action_upload": {
+      "codepoint": 57375,
+      "code": "0xE01F",
+      "file": "action_upload.svg",
+      "source": "arrow_upload_24_regular.svg",
+      "style": "regular",
+      "category": "action",
+      "keywords": [
+        "上传",
+        "upload"
+      ]
+    },
+    "media_audio_track": {
+      "codepoint": 57376,
+      "code": "0xE020",
+      "file": "media_audio_track.svg",
+      "source": "music_note_1_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "音轨",
+        "声道",
+        "audio track"
+      ]
+    },
+    "media_cast": {
+      "codepoint": 57377,
+      "code": "0xE021",
+      "file": "media_cast.svg",
+      "source": "cast_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "投屏",
+        "多屏",
+        "cast",
+        "multiscreen"
+      ]
+    },
+    "media_cloud_download": {
+      "codepoint": 57378,
+      "code": "0xE022",
+      "file": "media_cloud_download.svg",
+      "source": "cloud_arrow_down_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "云下载",
+        "cloud download",
+        "sync down"
+      ]
+    },
+    "media_cloud_upload": {
+      "codepoint": 57379,
+      "code": "0xE023",
+      "file": "media_cloud_upload.svg",
+      "source": "cloud_arrow_up_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "云上传",
+        "cloud upload",
+        "backup"
+      ]
+    },
+    "media_fast": {
+      "codepoint": 57380,
+      "code": "0xE024",
+      "file": "media_fast.svg",
+      "source": "fast_forward_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "快进",
+        "倍速",
+        "fast",
+        "speed"
+      ]
+    },
+    "media_favorite": {
+      "codepoint": 57381,
+      "code": "0xE025",
+      "file": "media_favorite.svg",
+      "source": "star_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "收藏",
+        "collect",
+        "star"
+      ]
+    },
+    "media_favorited": {
+      "codepoint": 57382,
+      "code": "0xE026",
+      "file": "media_favorited.svg",
+      "source": "star_24_filled.svg",
+      "style": "filled",
+      "category": "media",
+      "keywords": [
+        "已收藏",
+        "collected",
+        "starred"
+      ]
+    },
+    "media_file": {
+      "codepoint": 57383,
+      "code": "0xE027",
+      "file": "media_file.svg",
+      "source": "document_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "文件",
+        "file",
+        "document"
+      ]
+    },
+    "media_folder": {
+      "codepoint": 57384,
+      "code": "0xE028",
+      "file": "media_folder.svg",
+      "source": "folder_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "文件夹",
+        "目录",
+        "folder",
+        "directory"
+      ]
+    },
+    "media_folder_filled": {
+      "codepoint": 57385,
+      "code": "0xE029",
+      "file": "media_folder_filled.svg",
+      "source": "folder_24_filled.svg",
+      "style": "filled",
+      "category": "media",
+      "keywords": [
+        "文件夹选中",
+        "folder filled"
+      ]
+    },
+    "media_fullscreen": {
+      "codepoint": 57386,
+      "code": "0xE02A",
+      "file": "media_fullscreen.svg",
+      "source": "full_screen_maximize_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "全屏",
+        "fullscreen",
+        "expand"
+      ]
+    },
+    "media_pause": {
+      "codepoint": 57387,
+      "code": "0xE02B",
+      "file": "media_pause.svg",
+      "source": "pause_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "暂停",
+        "pause"
+      ]
+    },
+    "media_photo": {
+      "codepoint": 57388,
+      "code": "0xE02C",
+      "file": "media_photo.svg",
+      "source": "image_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "图片",
+        "照片",
+        "picture",
+        "photo",
+        "image"
+      ]
+    },
+    "media_play": {
+      "codepoint": 57389,
+      "code": "0xE02D",
+      "file": "media_play.svg",
+      "source": "play_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "播放",
+        "play"
+      ]
+    },
+    "media_play_last": {
+      "codepoint": 57390,
+      "code": "0xE02E",
+      "file": "media_play_last.svg",
+      "source": "previous_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "上一个",
+        "previous",
+        "last"
+      ]
+    },
+    "media_play_next": {
+      "codepoint": 57391,
+      "code": "0xE02F",
+      "file": "media_play_next.svg",
+      "source": "next_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "下一个",
+        "next",
+        "skip"
+      ]
+    },
+    "media_play_order": {
+      "codepoint": 57392,
+      "code": "0xE030",
+      "file": "media_play_order.svg",
+      "source": "list_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "顺序播放",
+        "order play",
+        "playlist"
+      ]
+    },
+    "media_repeat": {
+      "codepoint": 57393,
+      "code": "0xE031",
+      "file": "media_repeat.svg",
+      "source": "arrow_repeat_all_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "列表循环",
+        "repeat",
+        "loop"
+      ]
+    },
+    "media_repeat_one": {
+      "codepoint": 57394,
+      "code": "0xE032",
+      "file": "media_repeat_one.svg",
+      "source": "arrow_repeat_1_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "单曲循环",
+        "repeat one"
+      ]
+    },
+    "media_shuffle": {
+      "codepoint": 57395,
+      "code": "0xE033",
+      "file": "media_shuffle.svg",
+      "source": "arrow_shuffle_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "随机播放",
+        "shuffle",
+        "random"
+      ]
+    },
+    "media_subtitle": {
+      "codepoint": 57396,
+      "code": "0xE034",
+      "file": "media_subtitle.svg",
+      "source": "subtitles_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "字幕",
+        "文本",
+        "subtitle",
+        "text"
+      ]
+    },
+    "media_video": {
+      "codepoint": 57397,
+      "code": "0xE035",
+      "file": "media_video.svg",
+      "source": "video_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "视频",
+        "影片",
+        "video",
+        "movie"
+      ]
+    },
+    "media_video_filled": {
+      "codepoint": 57398,
+      "code": "0xE036",
+      "file": "media_video_filled.svg",
+      "source": "video_24_filled.svg",
+      "style": "filled",
+      "category": "media",
+      "keywords": [
+        "视频选中",
+        "video filled"
+      ]
+    },
+    "media_volume": {
+      "codepoint": 57399,
+      "code": "0xE037",
+      "file": "media_volume.svg",
+      "source": "speaker_2_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "音量",
+        "声音",
+        "volume",
+        "sound"
+      ]
+    },
+    "media_volume_down": {
+      "codepoint": 57400,
+      "code": "0xE038",
+      "file": "media_volume_down.svg",
+      "source": "speaker_1_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "减小音量",
+        "volume down"
+      ]
+    },
+    "media_volume_filled": {
+      "codepoint": 57401,
+      "code": "0xE039",
+      "file": "media_volume_filled.svg",
+      "source": "speaker_2_24_filled.svg",
+      "style": "filled",
+      "category": "media",
+      "keywords": [
+        "音量选中",
+        "volume filled"
+      ]
+    },
+    "media_volume_off": {
+      "codepoint": 57402,
+      "code": "0xE03A",
+      "file": "media_volume_off.svg",
+      "source": "speaker_mute_24_regular.svg",
+      "style": "regular",
+      "category": "media",
+      "keywords": [
+        "静音",
+        "mute",
+        "volume off"
+      ]
+    },
+    "nav_appstore": {
+      "codepoint": 57403,
+      "code": "0xE03B",
+      "file": "nav_appstore.svg",
+      "source": "app_store_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "应用市场",
+        "插件",
+        "appstore",
+        "plugin"
+      ]
+    },
+    "nav_arrow_left": {
+      "codepoint": 57404,
+      "code": "0xE03C",
+      "file": "nav_arrow_left.svg",
+      "source": "chevron_left_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "左箭头",
+        "arrow left",
+        "prev"
+      ]
+    },
+    "nav_arrow_right": {
+      "codepoint": 57405,
+      "code": "0xE03D",
+      "file": "nav_arrow_right.svg",
+      "source": "chevron_right_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "右箭头",
+        "arrow right",
+        "next"
+      ]
+    },
+    "nav_back": {
+      "codepoint": 57406,
+      "code": "0xE03E",
+      "file": "nav_back.svg",
+      "source": "arrow_left_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "返回",
+        "back"
+      ]
+    },
+    "nav_backtotop": {
+      "codepoint": 57407,
+      "code": "0xE03F",
+      "file": "nav_backtotop.svg",
+      "source": "arrow_up_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "回到顶部",
+        "back to top"
+      ]
+    },
+    "nav_discover": {
+      "codepoint": 57408,
+      "code": "0xE040",
+      "file": "nav_discover.svg",
+      "source": "compass_northwest_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "发现",
+        "探索",
+        "discover",
+        "explore"
+      ]
+    },
+    "nav_drawer": {
+      "codepoint": 57409,
+      "code": "0xE041",
+      "file": "nav_drawer.svg",
+      "source": "panel_left_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "抽屉",
+        "侧栏",
+        "drawer",
+        "sidebar"
+      ]
+    },
+    "nav_favorite": {
+      "codepoint": 57410,
+      "code": "0xE042",
+      "file": "nav_favorite.svg",
+      "source": "star_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "收藏",
+        "favorite",
+        "star"
+      ]
+    },
+    "nav_gallery": {
+      "codepoint": 57411,
+      "code": "0xE043",
+      "file": "nav_gallery.svg",
+      "source": "image_multiple_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "图库",
+        "相册",
+        "gallery"
+      ]
+    },
+    "nav_home": {
+      "codepoint": 57412,
+      "code": "0xE044",
+      "file": "nav_home.svg",
+      "source": "home_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "首页",
+        "home",
+        "house",
+        "main"
+      ]
+    },
+    "nav_home_filled": {
+      "codepoint": 57413,
+      "code": "0xE045",
+      "file": "nav_home_filled.svg",
+      "source": "home_24_filled.svg",
+      "style": "filled",
+      "category": "nav",
+      "keywords": [
+        "首页选中",
+        "home filled"
+      ]
+    },
+    "nav_import": {
+      "codepoint": 57414,
+      "code": "0xE046",
+      "file": "nav_import.svg",
+      "source": "arrow_import_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "导入",
+        "下载",
+        "import",
+        "download"
+      ]
+    },
+    "nav_import_filled": {
+      "codepoint": 57415,
+      "code": "0xE047",
+      "file": "nav_import_filled.svg",
+      "source": "arrow_import_24_filled.svg",
+      "style": "filled",
+      "category": "nav",
+      "keywords": [
+        "导入选中",
+        "import filled"
+      ]
+    },
+    "nav_library": {
+      "codepoint": 57416,
+      "code": "0xE048",
+      "file": "nav_library.svg",
+      "source": "library_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "媒体库",
+        "资料库",
+        "library",
+        "albums"
+      ]
+    },
+    "nav_library_filled": {
+      "codepoint": 57417,
+      "code": "0xE049",
+      "file": "nav_library_filled.svg",
+      "source": "library_24_filled.svg",
+      "style": "filled",
+      "category": "nav",
+      "keywords": [
+        "媒体库选中",
+        "library filled"
+      ]
+    },
+    "nav_quit": {
+      "codepoint": 57418,
+      "code": "0xE04A",
+      "file": "nav_quit.svg",
+      "source": "sign_out_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "退出",
+        "quit",
+        "exit"
+      ]
+    },
+    "nav_search": {
+      "codepoint": 57419,
+      "code": "0xE04B",
+      "file": "nav_search.svg",
+      "source": "search_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "搜索",
+        "search",
+        "find"
+      ]
+    },
+    "nav_search_filled": {
+      "codepoint": 57420,
+      "code": "0xE04C",
+      "file": "nav_search_filled.svg",
+      "source": "search_24_filled.svg",
+      "style": "filled",
+      "category": "nav",
+      "keywords": [
+        "搜索选中",
+        "search filled"
+      ]
+    },
+    "nav_settings": {
+      "codepoint": 57421,
+      "code": "0xE04D",
+      "file": "nav_settings.svg",
+      "source": "settings_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "设置",
+        "settings",
+        "gear"
+      ]
+    },
+    "nav_settings_filled": {
+      "codepoint": 57422,
+      "code": "0xE04E",
+      "file": "nav_settings_filled.svg",
+      "source": "settings_24_filled.svg",
+      "style": "filled",
+      "category": "nav",
+      "keywords": [
+        "设置选中",
+        "settings filled"
+      ]
+    },
+    "nav_todo": {
+      "codepoint": 57423,
+      "code": "0xE04F",
+      "file": "nav_todo.svg",
+      "source": "task_list_ltr_24_regular.svg",
+      "style": "regular",
+      "category": "nav",
+      "keywords": [
+        "任务",
+        "待办",
+        "todo",
+        "task"
+      ]
+    },
+    "setting_about": {
+      "codepoint": 57424,
+      "code": "0xE050",
+      "file": "setting_about.svg",
+      "source": "info_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "关于",
+        "about",
+        "info"
+      ]
+    },
+    "setting_account": {
+      "codepoint": 57425,
+      "code": "0xE051",
+      "file": "setting_account.svg",
+      "source": "person_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "账号",
+        "用户",
+        "account",
+        "user"
+      ]
+    },
+    "setting_brightness": {
+      "codepoint": 57426,
+      "code": "0xE052",
+      "file": "setting_brightness.svg",
+      "source": "brightness_high_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "亮度",
+        "brightness"
+      ]
+    },
+    "setting_calendar": {
+      "codepoint": 57427,
+      "code": "0xE053",
+      "file": "setting_calendar.svg",
+      "source": "calendar_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "日历",
+        "calendar",
+        "date"
+      ]
+    },
+    "setting_clean": {
+      "codepoint": 57428,
+      "code": "0xE054",
+      "file": "setting_clean.svg",
+      "source": "broom_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "清理缓存",
+        "缓存",
+        "clean",
+        "cache"
+      ]
+    },
+    "setting_clock": {
+      "codepoint": 57429,
+      "code": "0xE055",
+      "file": "setting_clock.svg",
+      "source": "clock_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "时间",
+        "clock",
+        "time"
+      ]
+    },
+    "setting_code": {
+      "codepoint": 57430,
+      "code": "0xE056",
+      "file": "setting_code.svg",
+      "source": "code_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "开发者",
+        "代码",
+        "code",
+        "developer"
+      ]
+    },
+    "setting_face": {
+      "codepoint": 57431,
+      "code": "0xE057",
+      "file": "setting_face.svg",
+      "source": "emoji_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "头像",
+        "个人",
+        "avatar",
+        "profile"
+      ]
+    },
+    "setting_font": {
+      "codepoint": 57432,
+      "code": "0xE058",
+      "file": "setting_font.svg",
+      "source": "text_font_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "字体",
+        "font",
+        "typography"
+      ]
+    },
+    "setting_keyboard": {
+      "codepoint": 57433,
+      "code": "0xE059",
+      "file": "setting_keyboard.svg",
+      "source": "keyboard_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "键盘",
+        "快捷键",
+        "keyboard",
+        "shortcut"
+      ]
+    },
+    "setting_language": {
+      "codepoint": 57434,
+      "code": "0xE05A",
+      "file": "setting_language.svg",
+      "source": "local_language_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "语言",
+        "language",
+        "i18n"
+      ]
+    },
+    "setting_network": {
+      "codepoint": 57435,
+      "code": "0xE05B",
+      "file": "setting_network.svg",
+      "source": "wifi_1_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "网络",
+        "network",
+        "wifi"
+      ]
+    },
+    "setting_notes": {
+      "codepoint": 57436,
+      "code": "0xE05C",
+      "file": "setting_notes.svg",
+      "source": "note_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "日志",
+        "备注",
+        "log",
+        "notes"
+      ]
+    },
+    "setting_password_hide": {
+      "codepoint": 57437,
+      "code": "0xE05D",
+      "file": "setting_password_hide.svg",
+      "source": "eye_off_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "隐藏密码",
+        "password hidden"
+      ]
+    },
+    "setting_password_show": {
+      "codepoint": 57438,
+      "code": "0xE05E",
+      "file": "setting_password_show.svg",
+      "source": "eye_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "显示密码",
+        "password visible",
+        "eye"
+      ]
+    },
+    "setting_quickstart": {
+      "codepoint": 57439,
+      "code": "0xE05F",
+      "file": "setting_quickstart.svg",
+      "source": "power_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "开机自启",
+        "quick start",
+        "launch"
+      ]
+    },
+    "setting_sound": {
+      "codepoint": 57440,
+      "code": "0xE060",
+      "file": "setting_sound.svg",
+      "source": "sound_wave_circle_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "音效",
+        "铃声",
+        "sound",
+        "ringtone"
+      ]
+    },
+    "setting_sound_off": {
+      "codepoint": 57441,
+      "code": "0xE061",
+      "file": "setting_sound_off.svg",
+      "source": "speaker_off_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "静音",
+        "关闭音效",
+        "sound off"
+      ]
+    },
+    "setting_storage_manage": {
+      "codepoint": 57442,
+      "code": "0xE062",
+      "file": "setting_storage_manage.svg",
+      "source": "storage_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "存储管理",
+        "storage"
+      ]
+    },
+    "setting_theme": {
+      "codepoint": 57443,
+      "code": "0xE063",
+      "file": "setting_theme.svg",
+      "source": "color_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "主题",
+        "外观",
+        "theme",
+        "appearance"
+      ]
+    },
+    "setting_translate": {
+      "codepoint": 57444,
+      "code": "0xE064",
+      "file": "setting_translate.svg",
+      "source": "translate_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "翻译",
+        "translate"
+      ]
+    },
+    "setting_unfold_reverse": {
+      "codepoint": 57445,
+      "code": "0xE065",
+      "file": "setting_unfold_reverse.svg",
+      "source": "chevron_up_down_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "折叠",
+        "collapse",
+        "unfold"
+      ]
+    },
+    "setting_update": {
+      "codepoint": 57446,
+      "code": "0xE066",
+      "file": "setting_update.svg",
+      "source": "arrow_circle_up_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "更新",
+        "升级",
+        "update",
+        "upgrade"
+      ]
+    },
+    "setting_voice": {
+      "codepoint": 57447,
+      "code": "0xE067",
+      "file": "setting_voice.svg",
+      "source": "mic_24_regular.svg",
+      "style": "regular",
+      "category": "setting",
+      "keywords": [
+        "语音",
+        "voice",
+        "mic"
+      ]
+    },
+    "status_cloud_off": {
+      "codepoint": 57448,
+      "code": "0xE068",
+      "file": "status_cloud_off.svg",
+      "source": "cloud_off_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "未同步",
+        "cloud off"
+      ]
+    },
+    "status_cloud_sync": {
+      "codepoint": 57449,
+      "code": "0xE069",
+      "file": "status_cloud_sync.svg",
+      "source": "cloud_sync_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "云同步",
+        "cloud sync",
+        "syncing"
+      ]
+    },
+    "status_connection": {
+      "codepoint": 57450,
+      "code": "0xE06A",
+      "file": "status_connection.svg",
+      "source": "plug_connected_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "连接",
+        "connection",
+        "link"
+      ]
+    },
+    "status_empty": {
+      "codepoint": 57451,
+      "code": "0xE06B",
+      "file": "status_empty.svg",
+      "source": "collections_empty_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "空态",
+        "无数据",
+        "empty",
+        "blank"
+      ]
+    },
+    "status_error": {
+      "codepoint": 57452,
+      "code": "0xE06C",
+      "file": "status_error.svg",
+      "source": "error_circle_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "错误",
+        "失败",
+        "error",
+        "fail"
+      ]
+    },
+    "status_fail": {
+      "codepoint": 57453,
+      "code": "0xE06D",
+      "file": "status_fail.svg",
+      "source": "dismiss_circle_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "失败",
+        "fail",
+        "broken"
+      ]
+    },
+    "status_help": {
+      "codepoint": 57454,
+      "code": "0xE06E",
+      "file": "status_help.svg",
+      "source": "question_circle_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "帮助",
+        "帮助中心",
+        "help",
+        "question"
+      ]
+    },
+    "status_loading": {
+      "codepoint": 57455,
+      "code": "0xE06F",
+      "file": "status_loading.svg",
+      "source": "arrow_sync_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "加载中",
+        "loading",
+        "spinner"
+      ]
+    },
+    "status_lock": {
+      "codepoint": 57456,
+      "code": "0xE070",
+      "file": "status_lock.svg",
+      "source": "lock_closed_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "锁定",
+        "lock",
+        "private"
+      ]
+    },
+    "status_message": {
+      "codepoint": 57457,
+      "code": "0xE071",
+      "file": "status_message.svg",
+      "source": "comment_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "消息",
+        "提醒",
+        "message",
+        "notification"
+      ]
+    },
+    "status_offline": {
+      "codepoint": 57458,
+      "code": "0xE072",
+      "file": "status_offline.svg",
+      "source": "globe_off_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "离线",
+        "断网",
+        "offline",
+        "no network"
+      ]
+    },
+    "status_online": {
+      "codepoint": 57459,
+      "code": "0xE073",
+      "file": "status_online.svg",
+      "source": "globe_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "在线",
+        "网络",
+        "online",
+        "wifi"
+      ]
+    },
+    "status_privacy": {
+      "codepoint": 57460,
+      "code": "0xE074",
+      "file": "status_privacy.svg",
+      "source": "incognito_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "隐私",
+        "privacy"
+      ]
+    },
+    "status_security": {
+      "codepoint": 57461,
+      "code": "0xE075",
+      "file": "status_security.svg",
+      "source": "shield_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "安全",
+        "security",
+        "shield"
+      ]
+    },
+    "status_success": {
+      "codepoint": 57462,
+      "code": "0xE076",
+      "file": "status_success.svg",
+      "source": "checkmark_circle_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "成功",
+        "完成",
+        "success",
+        "done"
+      ]
+    },
+    "status_sync": {
+      "codepoint": 57463,
+      "code": "0xE077",
+      "file": "status_sync.svg",
+      "source": "arrow_sync_circle_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "同步",
+        "sync"
+      ]
+    },
+    "status_unlock": {
+      "codepoint": 57464,
+      "code": "0xE078",
+      "file": "status_unlock.svg",
+      "source": "lock_open_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "解锁",
+        "unlock",
+        "public"
+      ]
+    },
+    "status_wlan_error": {
+      "codepoint": 57465,
+      "code": "0xE079",
+      "file": "status_wlan_error.svg",
+      "source": "wifi_warning_24_regular.svg",
+      "style": "regular",
+      "category": "status",
+      "keywords": [
+        "网络异常",
+        "network error"
+      ]
+    }
+  }
+}

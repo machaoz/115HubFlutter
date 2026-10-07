@@ -30,7 +30,7 @@ jobs:
 
       - name: Check formatting
         working-directory: app/gui
-        run: dart format --output=none --set-exit-if-changed lib test .tools
+        run: dart format --output=none --set-exit-if-changed lib test .tools tool
 
       - name: Analyze
         working-directory: app/gui
@@ -38,14 +38,55 @@ jobs:
 
       - name: Run pure Dart regression guards
         working-directory: app/gui
+        # 清单唯一数据源：新增护栏只需改 app/gui/.tools/guards.txt，
+        # 不必同时改本文件与 lunch（两处手写副本曾导致 6 个护栏永久不被调用）。
+        #
+        # 统一用 `dart <file>` 而非 `dart run <file>`：dartdev 会触发 sqlite3 的
+        # native assets 构建并挂死；直接指定文件可绕开。
+        #
+        # 注意：本步骤刻意排在原生构建**之前** —— 这些护栏的设计前提就是「不依赖
+        # hub_native.dll」（这样本地 ./lunch quality 也能免编译跑）。
+        # media_scan_check 因此只会验 Dart 回退分支；其 native FFI 分支由下一步
+        # 构建产物就位后的 flutter test（native 标签）覆盖。
+        shell: pwsh
         run: |
-          dart run .tools/qr_classify_check.dart
-          dart run .tools/pan115_task_check.dart
-          dart run .tools/search_fallback_check.dart
-          dart run .tools/source_protocol_check.dart
-          dart run .tools/person_catalog_check.dart
-          dart run .tools/session_cookie_check.dart
-          dart run .tools/shell_layout_check.dart
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path .tools/guards.txt)) { throw '护栏清单缺失：app/gui/.tools/guards.txt' }
+          # -Encoding UTF8 必须显式写：Windows PowerShell 5.1 的 Get-Content 默认按
+          # ANSI 解码无 BOM 的 UTF-8 文件，中文注释会被错解导致行边界错位（实测 50 行
+          # 读成 37 行），末尾注释被粘到 db_crash_guard 行前，该护栏因此被当成注释
+          # 静默跳过。pwsh 7 默认 UTF-8 侥幸不触发，但门禁不能押在 shell 版本默认值上。
+          $lines = @(Get-Content .tools/guards.txt -Encoding UTF8)
+          $expected = @($lines | Where-Object {
+            $t = $_.Trim(); $t -and -not $t.StartsWith('#')
+          }).Count
+          $ran = 0
+          foreach ($raw in $lines) {
+            $g = $raw.Trim()
+            if (-not $g -or $g.StartsWith('#')) { continue }
+            # 格式校验：非注释行必须是干净的脚本路径。上面那次错解码会产生形如
+            # "# ...中文...tool/db_crash_guard.dart" 的畸形行——不匹配即就地中止，
+            # 绝不允许被降级成注释、让护栏悄悄略过。
+            if ($g -notmatch '^[A-Za-z0-9_./-]+\.dart$') {
+              throw "护栏清单格式非法（疑似编码错乱）：[$g]"
+            }
+            $full = Join-Path (Get-Location) $g
+            if (-not (Test-Path $full)) { throw "护栏清单里的脚本不存在：$g" }
+            Write-Host "::group::guard $g"
+            try {
+              & dart $g
+              if ($LASTEXITCODE -ne 0) { throw "护栏失败（exit=$LASTEXITCODE）：$g" }
+              $ran++
+            } finally {
+              Write-Host '::endgroup::'
+            }
+          }
+          # 自维护不变量：实际跑过的个数必须等于清单里的有效行数。
+          # 差额非零 = 有护栏被静默跳过（这正是本步骤反复踩的坑），直接判失败。
+          if ($ran -ne $expected) {
+            throw "护栏执行数不符：清单 $expected 行，实跑 $ran 个"
+          }
+          Write-Host "护栏执行完毕：$ran / $expected 个"
 
       - name: Build native library (hub_native.dll)
         # 用 Visual Studio 生成器：windows-latest 预装 VS，无需 cl.exe 在 PATH；

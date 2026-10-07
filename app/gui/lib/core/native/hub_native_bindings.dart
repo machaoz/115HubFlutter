@@ -286,3 +286,161 @@ String hubLogCurrentFile() {
     return '';
   }
 }
+
+// ------------------------------------------------------------------ 媒体扫描
+// hub_media_scan 与 hub_secret_* 同样是「两段式」：先 out=null 问容量，再按容量
+// 取整段 JSON（长度完全由 native 决定，Dart 侧不做任何猜测）。
+// 差别在于这里**允许抛错** —— core/media/media_scan_gateway.dart 会捕获并降级到
+// Dart 回退；绑定层不替调用方吞掉失败，否则「扫不到」和「扫出来是空的」无法区分。
+
+const int _hubErrInvalidArg = -1;
+
+typedef _MediaScanNative = Int32 Function(
+  Pointer<Utf8>,
+  Int32,
+  Int32,
+  Pointer<Uint8>,
+  Int32,
+  Pointer<Int32>,
+);
+typedef _MediaScanDart = int Function(
+  Pointer<Utf8>,
+  int,
+  int,
+  Pointer<Uint8>,
+  int,
+  Pointer<Int32>,
+);
+
+/// 递归扫描 [root] 下的视频文件，返回 JSON 数组字符串：
+/// `[{"path":"D:/a/b.mkv","name":"b.mkv","size":123,"mtime":169...,"depth":2},...]`
+///
+/// [maxDepth] / [maxFiles] 传 <=0 时由 native 回落默认值（8 / 2000）。
+/// DLL 缺失、符号缺失、参数非法、IO 失败一律抛异常，由上层网关降级处理。
+String hubMediaScan(String root, {int maxDepth = 8, int maxFiles = 2000}) {
+  final f = _lib.lookupFunction<_MediaScanNative, _MediaScanDart>(
+    'hub_media_scan',
+  );
+  if (root.isEmpty) throw const _HubError(_hubErrInvalidArg);
+  final cRoot = root.toNativeUtf8();
+  final outLenPtr = malloc<Int32>();
+  try {
+    // 第一段：只问容量
+    outLenPtr.value = 0;
+    final probe = f(cRoot, maxDepth, maxFiles, nullptr, 0, outLenPtr);
+    if (probe != _hubErrBufferTooSmall) throw _HubError(probe);
+    final need = outLenPtr.value;
+    if (need <= 0) throw _HubError(probe);
+
+    // 第二段：按容量取数
+    final outPtr = malloc<Uint8>(need);
+    try {
+      final r = f(cRoot, maxDepth, maxFiles, outPtr, need, outLenPtr);
+      if (r != _hubOk) throw _HubError(r);
+      return outPtr.cast<Utf8>().toDartString();
+    } finally {
+      malloc.free(outPtr);
+    }
+  } finally {
+    malloc.free(cRoot);
+    malloc.free(outLenPtr);
+  }
+}
+
+// --------------------------------------------------------- 会话式媒体扫描
+// hub_scan_start 起后台线程返回会话 id（>0）；poll 轮询进度 JSON；pause/resume/
+// cancel 控制；result 取与 hub_media_scan 同构的条目 JSON；close 释放。
+// poll/result 与 hub_media_scan 一样是两段式（先问容量再取数）。
+
+typedef _ScanStartNative = Int32 Function(Pointer<Utf8>, Int32, Int32);
+typedef _ScanStartDart = int Function(Pointer<Utf8>, int, int);
+typedef _ScanCtlNative = Int32 Function(Int32);
+typedef _ScanCtlDart = int Function(int);
+typedef _ScanFetchNative = Int32 Function(
+  Int32,
+  Pointer<Uint8>,
+  Int32,
+  Pointer<Int32>,
+);
+typedef _ScanFetchDart = int Function(int, Pointer<Uint8>, int, Pointer<Int32>);
+
+/// 启动会话式扫描；返回会话 id（>0）。
+/// root 为空抛 INVALID_ARG；目录不存在/不可读抛 IO。
+int hubScanStart(String root, {int maxDepth = 8, int maxFiles = 2000}) {
+  final f = _lib.lookupFunction<_ScanStartNative, _ScanStartDart>(
+    'hub_scan_start',
+  );
+  if (root.isEmpty) throw const _HubError(_hubErrInvalidArg);
+  final cRoot = root.toNativeUtf8();
+  try {
+    final id = f(cRoot, maxDepth, maxFiles);
+    if (id <= 0) throw _HubError(id);
+    return id;
+  } finally {
+    malloc.free(cRoot);
+  }
+}
+
+/// 两段式取会话 JSON（poll 的进度 / result 的条目数组共用形态）
+String _scanFetchJson(int session, String symbol) {
+  final f = _lib.lookupFunction<_ScanFetchNative, _ScanFetchDart>(symbol);
+  final outLenPtr = malloc<Int32>();
+  try {
+    outLenPtr.value = 0;
+    final probe = f(session, nullptr, 0, outLenPtr);
+    if (probe != _hubErrBufferTooSmall) throw _HubError(probe);
+    final need = outLenPtr.value;
+    if (need <= 0) throw _HubError(probe);
+    final outPtr = malloc<Uint8>(need);
+    try {
+      final r = f(session, outPtr, need, outLenPtr);
+      if (r != _hubOk) throw _HubError(r);
+      return outPtr.cast<Utf8>().toDartString();
+    } finally {
+      malloc.free(outPtr);
+    }
+  } finally {
+    malloc.free(outLenPtr);
+  }
+}
+
+/// 轮询进度：`{"state":"running|paused|done|error|cancelled","files":N,"dir":"..."}`
+String hubScanPoll(int session) => _scanFetchJson(session, 'hub_scan_poll');
+
+/// 取结果（仅 state=done 时有效）：与 hub_media_scan 同构的条目 JSON 数组
+String hubScanResult(int session) => _scanFetchJson(session, 'hub_scan_result');
+
+/// 暂停（断点保留，resume 后继续，不重扫）；会话不存在抛异常
+void hubScanPause(int session) {
+  if (_lib.lookupFunction<_ScanCtlNative, _ScanCtlDart>('hub_scan_pause')(
+        session,
+      ) !=
+      _hubOk) {
+    throw const _HubError(_hubErrInvalidArg);
+  }
+}
+
+/// 恢复暂停中的扫描
+void hubScanResume(int session) {
+  if (_lib.lookupFunction<_ScanCtlNative, _ScanCtlDart>('hub_scan_resume')(
+        session,
+      ) !=
+      _hubOk) {
+    throw const _HubError(_hubErrInvalidArg);
+  }
+}
+
+/// 取消扫描（结果丢弃）
+void hubScanCancel(int session) {
+  if (_lib.lookupFunction<_ScanCtlNative, _ScanCtlDart>('hub_scan_cancel')(
+        session,
+      ) !=
+      _hubOk) {
+    throw const _HubError(_hubErrInvalidArg);
+  }
+}
+
+/// 关闭并释放会话（幂等；关闭后 id 立即失效）
+void hubScanClose(int session) {
+  _lib.lookupFunction<_ScanCtlNative, _ScanCtlDart>('hub_scan_close')(session);
+}

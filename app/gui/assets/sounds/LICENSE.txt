@@ -1,0 +1,39 @@
+提示音素材许可 —— 上游 License.txt 原文（逐字照录）
+=====================================================
+
+本目录下除本文件、CC0-1.0-legalcode.txt、LICENSE-NOTICE.txt 之外的 *.wav
+均派生自 Interface Sounds (1.0)，作者 Kenney (www.kenney.nl)。
+
+- 素材主页：https://kenney.nl/assets/interface-sounds
+- 许可：    Creative Commons Zero (CC0 1.0 Universal)
+- 许可全文：见同目录 CC0-1.0-legalcode.txt（https://creativecommons.org/publicdomain/zero/1.0/legalcode）
+
+CC0 意味着作者已把该作品奉献至公共领域：可用于个人 / 教育 / 商业项目，
+无需署名（上游原文写明 crediting Kenney 为可选的支持方式，非强制义务）。
+
+以下为上游随包 License.txt 的原文：
+
+--------------------------------------------------------------------------------
+	
+
+	Interface Sounds (1.0)
+
+	Created/distributed by Kenney (www.kenney.nl)
+	Creation date: 11-02-2020
+
+			------------------------------
+
+	License: (Creative Commons Zero, CC0)
+	http://creativecommons.org/publicdomain/zero/1.0/
+
+	This content is free to use in personal, educational and commercial projects.
+	Support us by crediting Kenney or www.kenney.nl (this is not mandatory)
+
+			------------------------------
+
+	Donate:   http://support.kenney.nl
+	Patreon:  http://patreon.com/kenney/
+
+	Follow on Twitter for updates:
+	http://twitter.com/KenneyNL
+--------------------------------------------------------------------------------

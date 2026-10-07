@@ -9,7 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/repos.dart';
 import '../../core/db/settings.dart';
-import '../../core/network/pan115_cloud.dart';
+import '../../state/cloud_sync_controller.dart';
 import '../../state/providers.dart';
 import '../../state/session.dart';
 import '../../core/util/image_loader.dart';
@@ -115,24 +115,10 @@ class ImportPage extends ConsumerStatefulWidget {
 class _ImportPageState extends ConsumerState<ImportPage> {
   static const Pan115Backend _backend = Pan115Backend();
 
-  /// 云端进度轮询（仅在有活跃任务且已登录时运行）
-  Timer? _poll;
-  String _cloudNote = '';
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _syncCloud();
-      _restartPoll();
-    });
-  }
-
-  @override
-  void dispose() {
-    _poll?.cancel();
-    super.dispose();
-  }
+  /// 云端进度轮询已收敛到 `CloudSyncController`：本页不再自持 Timer。
+  /// 「设置开关 + 已登录才轮询」由 controller 统一判断，本页只消费它的状态。
+  CloudSyncController get _sync =>
+      ref.read(cloudSyncControllerProvider.notifier);
 
   /// 清空**全部**本地导入记录（含排队 / 进行中）
   ///
@@ -178,45 +164,8 @@ class _ImportPageState extends ConsumerState<ImportPage> {
     if (!ok || !mounted) return;
     final removed = repo.clearAll();
     showHubToast(context, '已清空 $removed 条本地导入记录（115 云端任务未受影响）');
-    setState(() {});
-    _restartPoll();
-  }
-
-  /// 有活跃任务 + 已登录 + 开关开启时才起轮询，避免无谓打扰 115 接口
-  void _restartPoll() {
-    _poll?.cancel();
-    final db = ref.read(appDatabaseProvider).maybeValue;
-    if (db == null) return;
-    final cfg = ref.read(appSettingsProvider).pan115;
-    if (!cfg.pollCloudProgress) return;
-    if (!ref.read(sessionProvider).isLoggedIn) return;
-    if (ImportRepo(db).active().isEmpty) return;
-    _poll = Timer.periodic(
-      Duration(seconds: cfg.pollIntervalSeconds),
-      (_) => _syncCloud(),
-    );
-  }
-
-  /// 拉取 115 云端任务列表，回填本地任务的**真实进度**（W3）
-  Future<void> _syncCloud() async {
-    final db = ref.read(appDatabaseProvider).maybeValue;
-    if (db == null) return;
-    final session = ref.read(sessionProvider);
-    if (!session.isLoggedIn) {
-      if (mounted) setState(() => _cloudNote = '未登录 115：显示的是本地队列状态');
-      return;
-    }
-    final settings = ref.read(appSettingsProvider);
-    final note = await syncCloudToRepo(
-      ImportRepo(db),
-      cookie: session.cookie,
-      proxy: settings.network.proxy,
-      timeoutMs: settings.network.timeoutMs,
-    );
-    if (!mounted) return;
-    setState(() => _cloudNote = note);
-    // 没有活跃任务了就停轮询，别空转
-    _restartPoll();
+    // 本地队列变了，刷一遍快照（不打扰 115 接口）
+    _sync.refreshLocal();
   }
 
   Future<void> _runPending() async {
@@ -238,7 +187,6 @@ class _ImportPageState extends ConsumerState<ImportPage> {
     for (final r in rows) {
       final id = (r['id'] as num).round();
       repo.updateStatus(id, 'running', progress: 0, message: '正在投递到 115…');
-      if (mounted) setState(() {});
 
       final res = await _backend.submit(
         r['kind'].toString(),
@@ -252,19 +200,17 @@ class _ImportPageState extends ConsumerState<ImportPage> {
       } else {
         repo.updateStatus(id, 'failed', message: res.message);
       }
-      if (mounted) setState(() {});
     }
-    await _syncCloud();
+    // 队列 row 现由 controller 统一出具：这儿一次性同步 + 刷新快照即可
+    await _sync.syncNow();
     if (mounted) showHubToast(context, '投递完成，云端进度已同步');
   }
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final db = ref.watch(appDatabaseProvider).maybeValue;
-    final rows = db == null
-        ? const <Map<String, Object?>>[]
-        : ImportRepo(db).list();
+    // 与概览页共用同一份云端同步状态，两边看到的永远是同一批数据
+    final cloud = ref.watch(cloudSyncControllerProvider);
     final loggedIn = ref.watch(sessionProvider).isLoggedIn;
 
     return ListView(
@@ -282,10 +228,11 @@ class _ImportPageState extends ConsumerState<ImportPage> {
             final wide = c.maxWidth > 860;
             const login = _LoginCard();
             final board = _TaskBoard(
-              rows: rows,
-              cloudNote: _cloudNote,
+              rows: cloud.rows,
+              cloudNote: cloud.error ?? cloud.note,
               loggedIn: loggedIn,
-              onRefresh: _syncCloud,
+              busy: cloud.syncing,
+              onRefresh: _sync.syncNow,
             );
             if (!wide) {
               return Column(
@@ -323,9 +270,15 @@ class _ImportPageState extends ConsumerState<ImportPage> {
               label: '清空已完成',
               icon: Icons.cleaning_services_outlined,
               onPressed: () {
-                ImportRepo(ref.read(appDatabaseProvider).value!)
-                    .clearFinished();
-                setState(() {});
+                // DB 仍在打开 / 打开失败时不做任何事，
+                // 不能用 .value! 硬解包 —— 那样 loading/error 态会直接崩
+                final db = ref.read(appDatabaseProvider).maybeValue;
+                if (db == null) {
+                  showHubToast(context, '数据库尚未就绪，请稍后再试');
+                  return;
+                }
+                ImportRepo(db).clearFinished();
+                _sync.refreshLocal();
               },
             ),
             GhostButton(
@@ -528,11 +481,13 @@ class _TaskBoard extends StatelessWidget {
     required this.rows,
     required this.cloudNote,
     required this.loggedIn,
+    required this.busy,
     required this.onRefresh,
   });
   final List<Map<String, Object?>> rows;
   final String cloudNote;
   final bool loggedIn;
+  final bool busy;
   final Future<void> Function() onRefresh;
 
   @override
@@ -554,10 +509,22 @@ class _TaskBoard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (busy)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: t.accent,
+                    ),
+                  ),
+                ),
               GhostButton(
                 label: '同步云端进度',
                 icon: Icons.sync,
-                onPressed: () => onRefresh(),
+                onPressed: busy ? null : () => onRefresh(),
               ),
             ],
           ),

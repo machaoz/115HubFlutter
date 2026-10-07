@@ -20,7 +20,7 @@ class BuildInfo {
   /// 软件版本号（与 pubspec.yaml 的 version 保持同步）
   static const String appVersion = String.fromEnvironment(
     'HUB_APP_VERSION',
-    defaultValue: '2.0.0',
+    defaultValue: '2.3.0',
   );
 
   /// Flutter 框架版本（构建期由 `flutter --version` 注入）

@@ -388,7 +388,7 @@ class _MiniBtn extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: t.surface,
+          color: t.surface1,
           border: Border.all(color: t.border),
           borderRadius: BorderRadius.circular(9),
         ),

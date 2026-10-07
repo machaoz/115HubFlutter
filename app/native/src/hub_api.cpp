@@ -10,6 +10,8 @@
 #include "hub/baselib/magnet_util.h"
 #include "hub/baselib/version.h"
 #include "hub/log/logger.h"
+#include "hub/media_scan.h"
+#include "hub/media_scan_session.h"
 #include "hub/network/rate_limiter.h"
 #include "hub/system/paths.h"
 #include "hub/system/secret.h"
@@ -133,6 +135,122 @@ int32_t hub_net_rate_acquire(const char* host, int32_t min_interval_ms) {
   if (host == nullptr) return HUB_ERR_INVALID_ARG;
   (void)min_interval_ms;  // 间隔在初始化时固定为 1s（1 req/s 起步），细化排期在 P1
   return limiter().acquire(host);
+}
+
+// ------------------------------------------------------------------ 媒体扫描
+int32_t hub_media_scan(const char* root_utf8, int32_t max_depth, int32_t max_files,
+                       char* out, int32_t out_cap, int32_t* out_len) {
+  if (root_utf8 == nullptr || out_len == nullptr) return HUB_ERR_INVALID_ARG;
+  if (out != nullptr && out_cap < 0) return HUB_ERR_INVALID_ARG;
+
+  hub::media::ScanOptions opt;
+  opt.max_depth = max_depth;  // <=0 由 media 模块回落默认值
+  opt.max_files = max_files;
+
+  std::vector<hub::media::ScanEntry> entries;
+  const hub::media::ScanStatus st =
+      hub::media::scan_directory(std::string(root_utf8), opt, &entries);
+  if (st == hub::media::ScanStatus::kInvalidArg) return HUB_ERR_INVALID_ARG;
+  if (st == hub::media::ScanStatus::kIo) return HUB_ERR_IO;
+
+  const std::string json = hub::media::to_json_array(entries);
+  // +1 带上结尾 NUL：Dart 侧拿到缓冲区可直接按 C 字符串读，不必再自己补零
+  const int32_t need = static_cast<int32_t>(json.size()) + 1;
+  *out_len = need;
+  if (out == nullptr || out_cap < need) return HUB_ERR_BUFFER_TOO_SMALL;
+  std::memcpy(out, json.data(), static_cast<size_t>(need));
+  return HUB_OK;
+}
+
+// ---- 会话式扫描：状态 → JSON（{"state":"...","files":N,"dir":"..."}）----
+namespace {
+
+/// 两段式写出的公共尾：把 json 拷进 out（+NUL）；容量不足报 BUFFER_TOO_SMALL
+int32_t write_json_out(const std::string& json, char* out, int32_t out_cap,
+                       int32_t* out_len) {
+  if (out_len == nullptr) return HUB_ERR_INVALID_ARG;
+  const int32_t need = static_cast<int32_t>(json.size()) + 1;
+  *out_len = need;
+  if (out == nullptr || out_cap < need) return HUB_ERR_BUFFER_TOO_SMALL;
+  std::memcpy(out, json.data(), static_cast<size_t>(need));
+  return HUB_OK;
+}
+
+const char* scan_state_name(hub::media::ScanSessionState s) {
+  switch (s) {
+    case hub::media::ScanSessionState::kRunning: return "running";
+    case hub::media::ScanSessionState::kPaused: return "paused";
+    case hub::media::ScanSessionState::kDone: return "done";
+    case hub::media::ScanSessionState::kCancelled: return "cancelled";
+    case hub::media::ScanSessionState::kError: return "error";
+  }
+  return "error";
+}
+
+}  // namespace
+
+int32_t hub_scan_start(const char* root_utf8, int32_t max_depth, int32_t max_files) {
+  if (root_utf8 == nullptr) return HUB_ERR_INVALID_ARG;
+  hub::media::ScanOptions opt;
+  opt.max_depth = max_depth;
+  opt.max_files = max_files;
+  const int32_t id = hub::media::session::start(std::string(root_utf8), opt);
+  if (id <= 0) {
+    // 同步可判定的失败：空 root 按参数错，目录不存在/不可读按 IO 报
+    return root_utf8[0] == '\0' ? HUB_ERR_INVALID_ARG : HUB_ERR_IO;
+  }
+  return id;
+}
+
+int32_t hub_scan_poll(int32_t session, char* out, int32_t out_cap,
+                      int32_t* out_len) {
+  hub::media::ScanSessionProgress p;
+  if (!hub::media::session::progress(session, &p)) return HUB_ERR_INVALID_ARG;
+  std::string json = "{\"state\":\"";
+  json += scan_state_name(p.state);
+  json += "\",\"files\":";
+  json += std::to_string(p.files);
+  json += ",\"dir\":";
+  // dir 原样 UTF-8 透传，走一次 JSON 字符串转义防路径里的引号/反斜杠
+  json += '"';
+  for (unsigned char c : p.current_dir) {
+    switch (c) {
+      case '"': json += "\\\""; break;
+      case '\\': json += "\\\\"; break;
+      default: json.push_back(static_cast<char>(c)); break;
+    }
+  }
+  json += "\"}";
+  return write_json_out(json, out, out_cap, out_len);
+}
+
+int32_t hub_scan_pause(int32_t session) {
+  return hub::media::session::pause(session) ? HUB_OK : HUB_ERR_INVALID_ARG;
+}
+
+int32_t hub_scan_resume(int32_t session) {
+  return hub::media::session::resume(session) ? HUB_OK : HUB_ERR_INVALID_ARG;
+}
+
+int32_t hub_scan_cancel(int32_t session) {
+  return hub::media::session::cancel(session) ? HUB_OK : HUB_ERR_INVALID_ARG;
+}
+
+int32_t hub_scan_result(int32_t session, char* out, int32_t out_cap,
+                        int32_t* out_len) {
+  if (out_len == nullptr) return HUB_ERR_INVALID_ARG;
+  hub::media::ScanStatus st = hub::media::kOk;
+  if (!hub::media::session::finished(session, &st)) return HUB_ERR_INVALID_ARG;
+  if (st != hub::media::kOk) return HUB_ERR_IO;
+  const std::vector<hub::media::ScanEntry> entries =
+      hub::media::session::take(session, &st);
+  return write_json_out(hub::media::to_json_array(entries), out, out_cap, out_len);
+}
+
+int32_t hub_scan_close(int32_t session) {
+  // 幂等：会话不存在也返回 OK（关闭语义就是「此后别再用这个 id」）
+  hub::media::session::close(session);
+  return HUB_OK;
 }
 
 // ------------------------------------------------------------------ 日志

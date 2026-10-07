@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/db/hub_database.dart';
 import '../core/db/settings.dart';
+import '../core/navigation/app_route.dart';
 import '../core/native/hub_native_bindings.dart';
 import '../core/util/logger.dart';
 import '../core/util/app_paths.dart';
@@ -48,10 +49,21 @@ class SettingsController extends Notifier<AppSettings> {
   void patchCustomTheme({bool? dark, int? accent}) =>
       update(state.copyWith(customDark: dark, customAccent: accent));
 
+  /// 界面图标风格（auto / outline / filled，见 AppIconStyle）
+  void patchIconStyle(AppIconStyle style) =>
+      update(state.copyWith(iconStyle: style.name));
+
+  /// 提示音：总开关与音量（0..1）
+  void patchSound({bool? enabled, double? volume}) =>
+      update(state.copyWith(soundEnabled: enabled, soundVolume: volume));
+
   void patchRecommend(RecommendSettings s) =>
       update(state.copyWith(recommend: s));
   void patchSearch(SearchSettings s) => update(state.copyWith(search: s));
   void patchNetwork(NetworkSettings s) => update(state.copyWith(network: s));
+
+  /// 本地媒体库：视频扫描目录
+  void patchMedia(MediaSettings s) => update(state.copyWith(media: s));
 
   /// 115 会话：绑定设备槽位 / 云端进度轮询
   void patchPan115(Pan115Settings s) => update(state.copyWith(pan115: s));
@@ -86,30 +98,31 @@ final appSettingsProvider = NotifierProvider<SettingsController, AppSettings>(
   SettingsController.new,
 );
 
-/// 当前选中的导航页（0 概览 … 5 设置）
-/// 内部维护浏览历史栈：state 仍是「当前页索引」，对外 API 不变，
-/// 额外提供 back()/canBack 以支持「返回上一级」（缺陷 CJ1-0006）。
-class NavIndex extends Notifier<int> {
-  final List<int> _history = <int>[];
+/// 当前选中的导航页
+/// 内部维护浏览历史栈：state 是「当前页路由」，对外 API 与 int 时代一致
+/// （select / back / canBack / clearHistory），额外提供 back() 以支持
+/// 「返回上一级」（缺陷 CJ1-0006）。
+class NavIndex extends Notifier<AppRoute> {
+  final List<AppRoute> _history = <AppRoute>[];
 
   /// 初始页取设置里的「启动页」（默认发现）。
   /// 刻意用 read 而非 watch：建立依赖会让「用户在设置里改启动页」立刻把当前页弹走。
   @override
-  int build() {
+  AppRoute build() {
     final AppSettings s;
     try {
       s = ref.read(appSettingsProvider);
     } catch (_) {
-      return StartPage.startPageIndex('discover');
+      return StartPage.startPageRoute(null);
     }
-    return StartPage.startPageIndex(s.startPage);
+    return StartPage.startPageRoute(s.startPage);
   }
 
-  void select(int i) {
-    if (i == state) return;
+  void select(AppRoute r) {
+    if (r == state) return;
     _history.add(state);
     if (_history.length > 32) _history.removeAt(0);
-    state = i;
+    state = r;
   }
 
   bool get canBack => _history.isNotEmpty;
@@ -124,7 +137,7 @@ class NavIndex extends Notifier<int> {
   void clearHistory() => _history.clear();
 }
 
-final navIndexProvider = NotifierProvider<NavIndex, int>(NavIndex.new);
+final navIndexProvider = NotifierProvider<NavIndex, AppRoute>(NavIndex.new);
 
 /// AsyncValue 安全取值（Riverpod 3.x 不再提供 valueOrNull）
 extension AsyncDataX<T> on AsyncValue<T> {

@@ -1,0 +1,76 @@
+提示音素材：来源、许可与落地说明
+================================
+
+一、素材来源
+-----------
+- 名称：Interface Sounds (1.0)
+- 作者：Kenney（www.kenney.nl）
+- 主页：https://kenney.nl/assets/interface-sounds
+- 取用：100 个 OGG 中的 10 个（见第四节映射表）
+
+二、许可条款（依据上游随包 License.txt 与 CC0 1.0 法律文本）
+------------------------------------------------------------
+许可：**Creative Commons Zero（CC0 1.0 Universal）** —— 公共领域奉献。
+
+上游 License.txt 原文关键句（逐字照录，见同目录 LICENSE.txt）：
+
+    License: (Creative Commons Zero, CC0)
+    http://creativecommons.org/publicdomain/zero/1.0/
+
+    This content is free to use in personal, educational and commercial
+    projects. Support us by crediting Kenney or www.kenney.nl
+    (this is not mandatory)
+
+即：
+1) 可用于个人 / 教育 / **商业**项目；
+2) **署名不是强制义务**（上游明确写 "this is not mandatory"）；
+3) 作者已放弃著作权与相关权（CC0 法律文本见 CC0-1.0-legalcode.txt）；
+4) 允许修改（不像 HarmonyOS 素材那样有「不得修改」限制）。
+
+→ 结论：可用于本工程的商业发版，**无发版阻塞项**，也不需要等法务复核。
+
+三、为什么换掉原来的 HarmonyOS tones
+------------------------------------
+原 10 个提示音来自 `res/sound/HarmonyOS-tones/`。该目录**只有 168 个 WAV，
+没有任何 LICENSE 文件**；旧版本文件的「许可条款」是从
+`HarmonyOS Sans Fonts License Agreement`（字体许可，随 res/font 提供）推断的，
+而该协议第 1 条把授权对象明确限定为 "HarmonyOS Sans Fonts"（字体软件），
+**音效并不在字面范围内**。旧文本自己也写了「建议发版前由法务复核」。
+
+按 4.0 B2 的裁定（不卡在等法务，直接换明确可商用源），已整体替换为 CC0 素材。
+HarmonyOS tones 在 assets/ 下已全部移除。
+
+※ HarmonyOS **字体**不受影响：`assets/fonts/` 下的 HarmonyOS Sans SC 有随包
+  LICENSE.txt，条款明确覆盖字体本身，许可全文随包，属合规资产。
+
+四、落地文件清单（上游名 → 语义名）
+------------------------------------
+生成脚本：`.tools/build_sounds.py`（OGG → 16-bit PCM WAV，峰值归一到 -1 dBFS）
+
+| 落地文件名        | 上游文件             | 时长    | 格式         | 用途             |
+|------------------|---------------------|---------|-------------|------------------|
+| startup.wav      | open_001.ogg        | 0.148s  | 44.1kHz 单声道 | 应用启动完成     |
+| success.wav      | confirmation_002.ogg | 0.539s | 44.1kHz 单声道 | 通用操作成功     |
+| error.wav        | error_002.ogg       | 0.165s  | 44.1kHz 立体声 | 操作失败 / 错误  |
+| warning.wav      | error_005.ogg       | 0.500s  | 44.1kHz 单声道 | 警告 / 风险提示  |
+| notify.wav       | bong_001.ogg        | 0.123s  | 44.1kHz 单声道 | 通知提醒         |
+| click.wav        | click_001.ogg       | 0.100s  | 44.1kHz 单声道 | 按钮点击         |
+| task_start.wav   | pluck_001.ogg       | 0.102s  | 44.1kHz 立体声 | 任务开始         |
+| task_done.wav    | confirmation_004.ogg | 0.490s | 44.1kHz 单声道 | 任务完成         |
+| scan_done.wav    | confirmation_001.ogg | 0.290s | 44.1kHz 单声道 | 扫描 / 索引完成  |
+| import_done.wav  | confirmation_003.ogg | 0.322s | 44.1kHz 单声道 | 导入完成         |
+
+全部为 16-bit PCM WAV，合计 0.26 MiB（原 HarmonyOS tones 为 1.78 MiB）。
+
+对上游做的处理（CC0 允许修改）：
+- 解码 OGG 为 PCM 并重写为 WAV（Windows 桌面端免解码器）；
+- 逐文件峰值归一到 -1 dBFS（上游各音效响度不齐，否则混播时有的听不见有的刺耳）；
+- 重命名为本项目语义名。
+
+五、随包要求
+------------
+以下两份文件**必须**随安装包分发，不得删除（pubspec.yaml 已显式声明）：
+- `assets/sounds/LICENSE.txt`            —— 上游许可原文
+- `assets/sounds/CC0-1.0-legalcode.txt`  —— CC0 1.0 Universal 法律文本全文
+
+「设置 → 关于」页的许可查看器展示的正是本文件。

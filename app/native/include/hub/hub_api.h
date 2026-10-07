@@ -65,6 +65,36 @@ int32_t hub_parse_pan115_sha1(const char* uri, char* out_hex41);
 // host 级限流：返回需等待毫秒数（0 = 立即）
 int32_t hub_net_rate_acquire(const char* host, int32_t min_interval_ms);
 
+// ---- 媒体扫描（media 模块）----
+// 递归扫描 [root_utf8] 下的视频文件，结果序列化为 JSON 数组写入 out。
+// 两段式：先传 out=null / out_cap=0 只取所需字节数；再按该尺寸分配缓冲区取数。
+//   max_depth 递归深度上限（<=0 用默认 8）；max_files 结果上限（<=0 用默认 2000）
+//   *out_len 成功时 = 实际字节数（含结尾 NUL）
+// 返回 HUB_OK / HUB_ERR_BUFFER_TOO_SMALL / HUB_ERR_INVALID_ARG / HUB_ERR_IO
+// 输出形如：[{"path":"D:/a/b.mkv","name":"b.mkv","size":123,"mtime":169...,"depth":2}]
+//   path 分隔符统一为 '/';mtime 为 Unix **秒**;depth: root 直接子项 = 1
+// 跳过：目录、重解析点、以 '.' 开头的目录、$RECYCLE.BIN、System Volume Information
+int32_t hub_media_scan(const char* root_utf8, int32_t max_depth, int32_t max_files,
+                       char* out, int32_t out_cap, int32_t* out_len);
+
+// ---- 媒体扫描（media 模块）：会话式（进度/暂停/恢复/取消）----
+// 大目录扫描的 UI 友好形态：hub_scan_start 起后台线程返回会话 id，调用方用
+// hub_scan_poll 轮询进度（state=running/paused/done/error/cancelled + files
+// + 当前目录），结束用 hub_scan_result 取与 hub_media_scan 完全同构的 JSON
+// 数组，hub_scan_close 释放。暂停不重扫：恢复后从断点继续。
+//   * hub_scan_start：root 为空/不存在 → HUB_ERR_INVALID_ARG / HUB_ERR_IO
+//   * hub_scan_poll / hub_scan_result：两段式缓冲（同 hub_media_scan）
+//   * pause/resume/cancel：会话不存在 → HUB_ERR_INVALID_ARG；已结束仍可调（no-op）
+//   * hub_scan_result 仅在 state=done 时有效；error/cancelled 返回对应错误码
+//   * hub_scan_close 幂等；不 close 的会话由进程退出统一回收
+int32_t hub_scan_start(const char* root_utf8, int32_t max_depth, int32_t max_files);
+int32_t hub_scan_poll(int32_t session, char* out, int32_t out_cap, int32_t* out_len);
+int32_t hub_scan_pause(int32_t session);
+int32_t hub_scan_resume(int32_t session);
+int32_t hub_scan_cancel(int32_t session);
+int32_t hub_scan_result(int32_t session, char* out, int32_t out_cap, int32_t* out_len);
+int32_t hub_scan_close(int32_t session);
+
 // ---- 日志（hub_log 模块）----
 // 初始化原生日志：
 //   dir       日志目录（UTF-8），传 NULL 或空串表示只输出到 stderr

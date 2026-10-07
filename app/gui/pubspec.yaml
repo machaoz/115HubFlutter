@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.0.0+5
+version: 2.3.0+8
 
 environment:
   sdk: ^3.13.3
@@ -45,6 +45,9 @@ dependencies:
   collection: ^1.19.1
   crypto: ^3.0.7
   window_manager: ^0.5.2
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_windows_video: ^1.0.11
 
   # 【已移除】flutter_secure_storage：其依赖链
   # flutter_secure_storage_windows → path_provider → path_provider_foundation →
@@ -80,6 +83,51 @@ flutter:
   assets:
     - assets/migrations/
     - assets/migrations/checksums.json
+    # 提示音（Kenney Interface Sounds 精选 10 个，CC0；来历与许可见 assets/sounds/LICENSE-NOTICE.txt）
+    - assets/sounds/
+    # 提示音许可全文（CC0 法律文本 + 上游 License.txt）—— 发版硬门槛，必须随包。
+    # 注意：`- assets/sounds/` 是**目录**声明，pubspec 的资产打包会带上该目录下
+    # 所有文件，但显式列出这两份是为了让「删了就构建失败」成为可断言的约束，
+    # 也避免将来把 *.wav 挪走时把许可一起漏掉。
+    - assets/sounds/CC0-1.0-legalcode.txt
+    - assets/sounds/LICENSE.txt
+    # HarmonyOS Sans 字体许可全文（许可 §2.4 要求副本中保留协议全文，发版硬门槛）。
+    # 字体三档字重由下方 fonts: 段声明，但 LICENSE.txt 不在 fonts 段内，
+    # 必须在此显式列为 asset 才会打进产物 —— 否则装机会缺许可全文。
+    - assets/fonts/HarmonyOS_Sans_SC_LICENSE.txt
+    # HarmonyOS Symbol 图标字体许可全文（OpenHarmony，Apache-2.0）—— 同理发版硬门槛
+    - assets/fonts/hm_symbol_LICENSE.txt
+    # 图标字体与逻辑名索引（SVG 源文件不声明为 asset，避免打进产物）
+    - assets/icons/hub_icons.ttf
+    - assets/icons/index.json
+    # 图标许可全文（Fluent UI System Icons，MIT）—— MIT 要求副本中保留版权与
+    # 许可声明；与字体 LICENSE 同理，必须显式列为 asset 才会打进产物。
+    - assets/icons/LICENSE.txt
+    # 品牌素材（应用内展示图 / 关于页）
+    - assets/brand/
+
+  # 字体：HarmonyOS Sans SC（简体中文覆盖，含 GBK 全集），三档字重
+  # 许可：HarmonyOS Sans Fonts License Agreement，见 assets/fonts/HarmonyOS_Sans_SC_LICENSE.txt
+  fonts:
+    - family: HarmonyOS
+      fonts:
+        - asset: assets/fonts/HarmonyOS_Sans_SC_Regular.ttf
+          weight: 400
+        - asset: assets/fonts/HarmonyOS_Sans_SC_Medium.ttf
+          weight: 500
+        - asset: assets/fonts/HarmonyOS_Sans_SC_Bold.ttf
+          weight: 700
+    # 图标字体：122 个 Fluent UI System Icons（MIT）预编译为 TTF，零运行时依赖。
+    # 由 .tools/build_icon_font.py 生成，许可全文见 assets/icons/LICENSE.txt
+    - family: HubIcons
+      fonts:
+        - asset: assets/icons/hub_icons.ttf
+    # 图标字体：HarmonyOS Symbol 子集（OpenHarmony global_system_resources，
+    # Apache-2.0，6 码位 3.4KB）。来源与码位对照见 lib/ui/hm_symbols.dart，
+    # 许可全文见 assets/fonts/hm_symbol_LICENSE.txt
+    - family: HMSymbol
+      fonts:
+        - asset: assets/fonts/hm_symbol.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

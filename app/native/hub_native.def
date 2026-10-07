@@ -11,6 +11,14 @@ EXPORTS
     hub_parse_magnet_infohash
     hub_parse_pan115_sha1
     hub_net_rate_acquire
+    hub_media_scan
+    hub_scan_start
+    hub_scan_poll
+    hub_scan_pause
+    hub_scan_resume
+    hub_scan_cancel
+    hub_scan_result
+    hub_scan_close
     hub_log_init
     hub_log_write
     hub_log_current_file

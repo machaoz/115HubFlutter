@@ -1,0 +1,54 @@
+# ============================================================================
+# 纯 Dart 回归护栏清单（唯一数据源）
+#
+# 为什么有这个文件：
+#   护栏清单原先在 `project/lunch` 与 `.github/workflows/ci.yml` 里各存一份手写
+#   副本。加护栏时只要漏改一边，那个脚本就永久不被任何自动门禁调用 —— 表面绿灯、
+#   实际裸奔。历史上有 6 个护栏（asset_license / media_* / pan115_files）正是这样
+#   悄悄失效的。故收敛为单一清单，两边都从这里读。
+#
+# 如何新增护栏：
+#   在下面加一行相对于 app/gui 的路径即可，lunch 与 CI 自动生效，**不需要**再去
+#   改这两个文件。
+#
+# 调用方式为什么统一是 `dart <file>` 而不是 `dart run <file>`：
+#   `dart run` 走 dartdev，会触发依赖树里 sqlite3 的 native assets 构建钩子，
+#   在受限环境下直接挂死（本机实测）。直接指定文件路径可绕开 dartdev。
+#   本机验证过：下面 15 个脚本在 `dart <file>` 下全部通过。
+#
+# 规则：路径相对于 app/gui；`#` 开头与空行忽略；顺序 = 执行顺序。
+#
+# 读取方：lunch 用 bash 逐行读（字节流，编码无关）；CI 用 pwsh Get-Content 并
+# **显式** -Encoding UTF8。两边都会校验非注释行必须是 `^[A-Za-z0-9_./-]+\.dart$`，
+# 畸形行就地报错而非被当注释略过 —— 防止「护栏静默不被执行」重演。
+# ============================================================================
+
+# ---- 路由 / 资源（最基础，先验）----
+.tools/app_route_check.dart
+.tools/asset_license_check.dart
+
+# ---- 会话与凭证红线 ----
+.tools/session_cookie_check.dart
+.tools/qr_classify_check.dart
+
+# ---- 源站协议与搜索 ----
+.tools/source_protocol_check.dart
+.tools/search_fallback_check.dart
+.tools/person_catalog_check.dart
+
+# ---- 115 网盘 ----
+.tools/pan115_task_check.dart
+.tools/pan115_files_check.dart
+
+# ---- 本地媒体库（B1 批次）----
+.tools/media_title_check.dart
+.tools/media_local_check.dart
+.tools/media_grouping_check.dart
+.tools/media_scan_check.dart
+
+# ---- 布局 ----
+.tools/shell_layout_check.dart
+
+# ---- 崩溃恢复：曾出现进程崩溃残留 -wal/-shm 导致启动直接失败
+#      （SqliteException 1546 disk I/O error），且当时无用例守住该路径。
+tool/db_crash_guard.dart

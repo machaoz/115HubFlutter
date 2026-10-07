@@ -1,0 +1,50 @@
+Fluent UI System Icons 许可全文
+===============================
+
+本目录下除 LICENSE.txt / index.json 之外的文件（hub_icons.ttf 与全部 *.svg）
+均派生自 Fluent UI System Icons（Microsoft）。
+
+- 上游仓库：https://github.com/microsoft/fluentui-system-icons
+- npm 包：  @fluentui/svg-icons（本工程取用版本 1.1.343）
+- 许可：    MIT（Copyright (c) 2020 Microsoft Corporation）
+
+以下为上游 LICENSE 原文（逐字照录，取自
+https://github.com/microsoft/fluentui-system-icons 的 LICENSE 文件）：
+
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2020 Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+本工程对上游做了什么（MIT 允许修改与再分发，仅此声明，不改变许可性质）：
+
+1. 从 21,798 个 SVG 中选取 122 个（24px 的 regular / filled 变体），
+   映射为本项目语义名（见 index.json 的 icons.*.source）。
+2. 用 .tools/build_icon_font.py 把路径数据等比变换后编译为单字重 TTF
+   （family: HubIcons，码位 0xE000 起）。坐标只做等比缩放 + y 翻转，
+   未改变图形相对关系。
+3. 图标的着色由 Flutter 运行时的 Icon(color:) 决定；上游 SVG 已去除固定填充色。
+
+MIT 要求「在副本中包含版权声明与许可声明」—— 本文件即该声明，且已随安装包
+分发（pubspec.yaml 的 flutter.assets 显式声明本文件）。
